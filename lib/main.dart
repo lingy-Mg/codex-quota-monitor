@@ -1,0 +1,128 @@
+import 'dart:async';
+import 'dart:ui' show DartPluginRegistrant;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'app/monitor_controller.dart';
+import 'app/theme.dart';
+import 'app/settings.dart';
+import 'core/security.dart';
+import 'core/models.dart';
+import 'database/app_database.dart';
+import 'features/auth/configuration_page.dart';
+import 'features/dashboard/dashboard_page.dart';
+import 'services/boot_monitor_service.dart';
+import 'services/codex_api_service.dart';
+import 'services/adb_credential_import.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  await WakelockPlus.enable();
+  runApp(const ProviderScope(child: CodexMonitorApp()));
+}
+
+/// Entry point launched by the native opt-in foreground service after boot.
+/// It only accesses the same Keystore-backed credentials as the foreground UI
+/// and keeps the notification free of account information.
+@pragma('vm:entry-point')
+void bootMonitorEntrypoint() {
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
+  final database = AppDatabase();
+  final store = CredentialStore();
+  final api = CodexApiService();
+
+  Future<void> poll() async {
+    final credentials = await store.read();
+    if (credentials == null) return;
+    try {
+      var current = credentials;
+      CodexUsageResponse usage;
+      try {
+        usage = await api.usage(current);
+      } on ApiException catch (error) {
+        if (error.statusCode != 401) rethrow;
+        current = await api.refresh(current);
+        await store.write(current);
+        usage = await api.usage(current);
+      }
+      await database.saveUsage(usage, DateTime.now());
+      final remaining = usage.rateLimit.windows.isEmpty
+          ? '--'
+          : '${usage.rateLimit.windows.first.remainingPercent?.round() ?? '--'}%';
+      await BootMonitorService.publishRemaining(remaining);
+    } catch (_) {
+      // Failure is intentionally silent here: retry follows the configured
+      // cadence and no request metadata/credentials are persisted or logged.
+    }
+  }
+
+  unawaited(poll());
+  AppSettings.load().then((settings) {
+    Timer.periodic(Duration(seconds: settings.refreshSeconds), (_) => poll());
+  });
+}
+
+class CodexMonitorApp extends ConsumerStatefulWidget {
+  const CodexMonitorApp({super.key});
+  @override
+  ConsumerState<CodexMonitorApp> createState() => _CodexMonitorAppState();
+}
+
+class _CodexMonitorAppState extends ConsumerState<CodexMonitorApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_consumeAdbCredentialImport());
+  }
+
+  Future<void> _consumeAdbCredentialImport() async {
+    try {
+      // The controller's initial Keystore read must finish before an ADB
+      // import writes new values; otherwise its stale initial state could
+      // overwrite the freshly configured dashboard state.
+      await ref.read(dashboardProvider.future);
+      final authJson = await AdbCredentialImport.consume();
+      if (authJson == null || authJson.trim().isEmpty) return;
+      await ref.read(dashboardProvider.notifier).importCredentials(authJson);
+    } on PlatformException {
+      // The bridge is intentionally absent from release builds. Never include
+      // credential details in errors or logs.
+    } on FormatException {
+      // A malformed staged file is consumed and discarded by the native side.
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      ref.read(dashboardProvider.notifier).refresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final d = ref.watch(dashboardProvider);
+    final configured = d.value?.credentials != null;
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Codex 额度监控',
+      theme: monitorTheme(),
+      home: configured ? const DashboardPage() : const ConfigurationPage(),
+    );
+  }
+}
