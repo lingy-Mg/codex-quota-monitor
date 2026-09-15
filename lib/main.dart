@@ -22,8 +22,17 @@ Future<void> main() async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  await WakelockPlus.enable();
+  final initialSettings = await AppSettings.load();
+  await SystemChrome.setEnabledSystemUIMode(
+    initialSettings.immersive
+        ? SystemUiMode.immersiveSticky
+        : SystemUiMode.edgeToEdge,
+  );
+  if (initialSettings.keepAwake) {
+    await WakelockPlus.enable();
+  } else {
+    await WakelockPlus.disable();
+  }
   runApp(const ProviderScope(child: CodexMonitorApp()));
 }
 
@@ -37,11 +46,14 @@ void bootMonitorEntrypoint() {
   final database = AppDatabase();
   final store = CredentialStore();
   final api = CodexApiService();
+  var pollInProgress = false;
 
   Future<void> poll() async {
-    final credentials = await store.read();
-    if (credentials == null) return;
+    if (pollInProgress) return;
+    pollInProgress = true;
     try {
+      final credentials = await store.read();
+      if (credentials == null) return;
       var current = credentials;
       CodexUsageResponse usage;
       try {
@@ -52,7 +64,12 @@ void bootMonitorEntrypoint() {
         await store.write(current);
         usage = await api.usage(current);
       }
-      await database.saveUsage(usage, DateTime.now());
+      final settings = await AppSettings.load();
+      await database.saveUsage(
+        usage,
+        DateTime.now(),
+        retentionDays: settings.historyDays,
+      );
       final remaining = usage.rateLimit.windows.isEmpty
           ? '--'
           : '${usage.rateLimit.windows.first.remainingPercent?.round() ?? '--'}%';
@@ -60,13 +77,18 @@ void bootMonitorEntrypoint() {
     } catch (_) {
       // Failure is intentionally silent here: retry follows the configured
       // cadence and no request metadata/credentials are persisted or logged.
+    } finally {
+      pollInProgress = false;
     }
   }
 
   unawaited(poll());
-  AppSettings.load().then((settings) {
-    Timer.periodic(Duration(seconds: settings.refreshSeconds), (_) => poll());
-  });
+  AppSettings.load().then(
+    (settings) => Timer.periodic(
+      Duration(seconds: settings.refreshSeconds),
+      (_) => poll(),
+    ),
+  );
 }
 
 class CodexMonitorApp extends ConsumerStatefulWidget {
@@ -110,12 +132,22 @@ class _CodexMonitorAppState extends ConsumerState<CodexMonitorApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
     if (s == AppLifecycleState.resumed) {
+      final settings = ref.read(settingsProvider).value;
+      if (settings != null) {
+        unawaited(ref.read(dashboardProvider.notifier).applyDisplay(settings));
+      }
       ref.read(dashboardProvider.notifier).refresh();
     }
   }
 
   @override
   Widget build(BuildContext c) {
+    ref.listen(settingsProvider, (previous, next) {
+      final settings = next.value;
+      if (settings != null) {
+        unawaited(ref.read(dashboardProvider.notifier).applyDisplay(settings));
+      }
+    });
     final d = ref.watch(dashboardProvider);
     final configured = d.value?.credentials != null;
     return MaterialApp(

@@ -5,10 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../app/monitor_controller.dart';
+import '../../app/settings.dart';
 import '../../app/theme.dart';
+import '../../core/bounded_cache.dart';
 import '../../core/models.dart';
 import '../../database/app_database.dart';
 import 'history_period.dart';
+import 'remaining_quota_forecast.dart';
+import 'quota_overview.dart';
 import '../settings/settings_page.dart';
 
 class DashboardPage extends ConsumerStatefulWidget {
@@ -24,18 +28,24 @@ class DashboardPage extends ConsumerStatefulWidget {
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   Timer? _ticker;
-  Duration _range = const Duration(hours: 24);
+  late final ValueNotifier<DateTime> _clock;
+  Duration? _selectedRange;
+  HistoryPeriodKind _periodKind = HistoryPeriodKind.rolling;
   @override
   void initState() {
     super.initState();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
+    _clock = ValueNotifier(widget.now?.call() ?? DateTime.now());
+    if (widget.now == null) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        _clock.value = DateTime.now();
+      });
+    }
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _clock.dispose();
     super.dispose();
   }
 
@@ -46,9 +56,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final setting = ref.watch(settingsProvider).value;
+    final range = _selectedRange ?? _savedHistoryRange(setting);
     final windows = state.usage?.rateLimit.windows ?? const <RateWindow>[];
     final short = windows.isEmpty ? null : windows.first;
-    final now = widget.now?.call() ?? DateTime.now();
+    final now = widget.now?.call() ?? _clock.value;
     final dashboard = LayoutBuilder(
       builder: (context, box) {
         final gap = box.maxWidth < 1400 ? AppSpace.sm : AppSpace.md;
@@ -65,46 +76,38 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               ),
               SizedBox(height: gap),
               Expanded(
-                flex: 40,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 49,
-                      child: _Hero(
-                        window: short,
-                        now: now,
-                        onExpired: widget.preview == null
-                            ? () => ref
-                                  .read(dashboardProvider.notifier)
-                                  .onCountdownEnded()
-                            : () {},
-                      ),
-                    ),
-                    SizedBox(width: gap),
-                    Expanded(flex: 16, child: _Credits(usage: state.usage)),
-                    if (state.usage?.additional.isNotEmpty == true) ...[
-                      SizedBox(width: gap),
-                      Expanded(
-                        flex: 18,
-                        child: _Additional(item: state.usage!.additional.first),
-                      ),
-                    ],
-                  ],
+                flex: 46,
+                child: ValueListenableBuilder<DateTime>(
+                  valueListenable: _clock,
+                  builder: (context, clockNow, child) => QuotaOverview(
+                    usage: state.usage,
+                    now: widget.now?.call() ?? clockNow,
+                    stale: state.health != MonitorHealth.live,
+                    gap: gap,
+                    onExpired: widget.preview == null
+                        ? () => ref
+                              .read(dashboardProvider.notifier)
+                              .onCountdownEnded()
+                        : () {},
+                  ),
                 ),
               ),
               SizedBox(height: gap),
               Expanded(
-                flex: 60,
+                flex: 54,
                 child: Row(
                   children: [
                     Expanded(
                       flex: 70,
                       child: _History(
-                        range: _range,
-                        onRange: (v) => setState(() => _range = v),
+                        range: range,
+                        onRange: _selectRange,
+                        periodKind: _periodKind,
+                        onPeriodKind: (value) =>
+                            setState(() => _periodKind = value),
                         stamp: state.lastSync,
                         asOf: now,
-                        weeklyResetAt: _weeklyResetAt(windows),
+                        refreshWindow: short,
                       ),
                     ),
                     SizedBox(width: gap),
@@ -118,31 +121,67 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       },
     );
     return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, viewport) {
-          // Some Android desktop/emulator displays report only 640×360dp
-          // while rendering at 1280×720 pixels. The full monitoring screen is
-          // intentionally a fixed one-screen dashboard, so scale its proven
-          // tablet grid instead of letting card contents overflow or scroll.
-          final useCompactCanvas =
-              viewport.maxWidth < 1000 || viewport.maxHeight < 700;
-          if (!useCompactCanvas) return dashboard;
-          return ColoredBox(
-            color: AppColors.bg,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                // A 16:9 baseline fills compact landscape displays while
-                // preserving the dashboard's grid proportions and readable
-                // status text at 720p.
-                child: SizedBox(width: 1080, height: 608, child: dashboard),
+      body: MediaQuery.removePadding(
+        context: context,
+        removeTop: true,
+        removeBottom: true,
+        child: LayoutBuilder(
+          builder: (context, viewport) {
+            // Some Android desktop/emulator displays report only 640×360dp
+            // while rendering at 1280×720 pixels. The full monitoring screen is
+            // intentionally a fixed one-screen dashboard, so scale its proven
+            // tablet grid instead of letting card contents overflow or scroll.
+            final useCompactCanvas =
+                viewport.maxWidth < 1000 || viewport.maxHeight < 700;
+            if (!useCompactCanvas) return dashboard;
+            final baselineHeight =
+                1080 * viewport.maxHeight / viewport.maxWidth;
+            return ColoredBox(
+              color: AppColors.bg,
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  // Match the baseline aspect ratio to the real viewport. This
+                  // keeps the compact 16:9 canvas unchanged while allowing a
+                  // 16:10 tablet to consume its extra vertical space.
+                  child: SizedBox(
+                    width: 1080,
+                    height: baselineHeight,
+                    child: dashboard,
+                  ),
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
+
+  void _selectRange(Duration range) {
+    setState(() {
+      _selectedRange = range;
+      _periodKind = HistoryPeriodKind.rolling;
+    });
+    final settings = ref.read(settingsProvider).value ?? const AppSettings();
+    unawaited(
+      ref
+          .read(settingsProvider.notifier)
+          .saveSettings(
+            settings.copyWith(historyRangeMinutes: range.inMinutes),
+          ),
+    );
+  }
+}
+
+Duration _savedHistoryRange(AppSettings? settings) {
+  final saved = Duration(
+    minutes:
+        settings?.historyRangeMinutes ?? const Duration(hours: 24).inMinutes,
+  );
+  return _ranges.any((option) => option.$2 == saved)
+      ? saved
+      : const Duration(hours: 24);
 }
 
 class _Card extends StatelessWidget {
@@ -163,16 +202,15 @@ class _Card extends StatelessWidget {
 }
 
 class _CardTitle extends StatelessWidget {
-  const _CardTitle(this.text, {this.subtle = false});
+  const _CardTitle(this.text);
   final String text;
-  final bool subtle;
 
   @override
   Widget build(BuildContext context) => Text(
     text,
     style: TextStyle(
-      color: subtle ? AppColors.secondary : AppColors.text,
-      fontSize: subtle ? 14 : 16,
+      color: AppColors.text,
+      fontSize: 16,
       fontWeight: FontWeight.w700,
     ),
   );
@@ -236,37 +274,66 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          const Spacer(),
-          _HeaderStatus(
-            icon: Icons.circle,
-            iconColor: health == MonitorHealth.live
-                ? AppColors.green
-                : AppColors.warning,
-            label: '网络 ${health == MonitorHealth.live ? '在线' : label}',
-          ),
-          _HeaderStatus(icon: Icons.refresh_rounded, label: '自动刷新 ${refresh}s'),
-          _HeaderStatus(
-            icon: Icons.bolt_outlined,
-            label: state.device?.charging == true ? '已供电' : '电池供电',
-          ),
-          const _HeaderStatus(icon: Icons.dark_mode_outlined, label: '深色模式'),
-          _HeaderStatus(
-            icon: Icons.schedule_outlined,
-            label:
-                '最后同步 ${state.lastSync == null ? '--' : DateFormat('HH:mm:ss').format(state.lastSync!)}',
-          ),
-          const SizedBox(width: AppSpace.xs),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: AppColors.surfaceHover.withValues(alpha: .55),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: IconButton(
-              onPressed: onSettings,
-              icon: const Icon(Icons.settings_outlined, size: 21),
-              color: AppColors.text,
-              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-              tooltip: '设置',
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _HeaderStatus(
+                      icon: Icons.circle,
+                      iconColor: health == MonitorHealth.live
+                          ? AppColors.green
+                          : AppColors.warning,
+                      label:
+                          '网络 ${health == MonitorHealth.live ? '在线' : label}',
+                    ),
+                    _HeaderStatus(
+                      icon: Icons.refresh_rounded,
+                      label: '自动刷新 ${refresh}s',
+                    ),
+                    _HeaderStatus(
+                      icon: Icons.bolt_outlined,
+                      label: state.device?.charging == true ? '已供电' : '电池供电',
+                    ),
+                    _HeaderStatus(
+                      icon: Icons.memory_outlined,
+                      label: state.device == null
+                          ? '内存 --'
+                          : '内存 ${state.device!.memoryMb.toStringAsFixed(1)} MB',
+                    ),
+                    const _HeaderStatus(
+                      icon: Icons.dark_mode_outlined,
+                      label: '深色模式',
+                    ),
+                    _HeaderStatus(
+                      icon: Icons.schedule_outlined,
+                      label:
+                          '最后同步 ${state.lastSync == null ? '--' : DateFormat('HH:mm:ss').format(state.lastSync!)}',
+                    ),
+                    const SizedBox(width: AppSpace.xs),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceHover.withValues(alpha: .55),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: IconButton(
+                        onPressed: onSettings,
+                        icon: const Icon(Icons.settings_outlined, size: 21),
+                        color: AppColors.text,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 36,
+                        ),
+                        tooltip: '设置',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -302,232 +369,22 @@ class _HeaderStatus extends StatelessWidget {
   );
 }
 
-class _Hero extends StatelessWidget {
-  const _Hero({
-    required this.window,
-    required this.now,
-    required this.onExpired,
-  });
-  final RateWindow? window;
-  final DateTime now;
-  final VoidCallback onExpired;
-  @override
-  Widget build(BuildContext c) {
-    final compact = MediaQuery.sizeOf(c).height < 700;
-    final resetDuration = window?.resetAt?.toLocal().difference(now);
-    if (resetDuration?.isNegative == true) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => onExpired());
-    }
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _CardTitle('当前额度', subtle: true),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '剩余 ${window?.remainingPercent?.round() ?? '--'}%',
-                  style: TextStyle(
-                    fontSize: compact ? 28 : 36,
-                    fontWeight: FontWeight.w700,
-                    height: 1,
-                  ),
-                ),
-                SizedBox(height: compact ? AppSpace.sm : AppSpace.md),
-                _QuotaProgress(
-                  label: '剩余资源',
-                  value: window?.remainingPercent,
-                  detail: '已使用 ${window?.usedPercent?.round() ?? '--'}%',
-                  color: AppColors.cyan,
-                ),
-                SizedBox(height: compact ? AppSpace.xs : AppSpace.sm),
-                _QuotaProgress(
-                  label: '剩余时间',
-                  value: window?.timeRemainingPercent(now),
-                  detail: window?.resetAt == null
-                      ? '重置 --'
-                      : durationClock(resetDuration!),
-                  color: AppColors.green,
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: AppSpace.lg, color: AppColors.divider),
-          const Row(
-            children: [
-              Icon(Icons.circle, size: 6, color: AppColors.green),
-              SizedBox(width: 6),
-              Text(
-                '实时更新 · 当前配额正常',
-                style: TextStyle(color: AppColors.green, fontSize: 11),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuotaProgress extends StatelessWidget {
-  const _QuotaProgress({
-    required this.label,
-    required this.value,
-    required this.detail,
-    required this.color,
-  });
-  final String label;
-  final double? value;
-  final String detail;
-  final Color color;
-
-  @override
-  Widget build(BuildContext c) {
-    final compact = MediaQuery.sizeOf(c).height < 700;
-    final percent = value?.clamp(0, 100).toDouble();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: AppColors.muted,
-                fontSize: compact ? 10 : 11,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              percent == null ? '--' : '${percent.round()}%',
-              style: TextStyle(
-                color: color,
-                fontSize: compact ? 10 : 11,
-                fontWeight: FontWeight.w700,
-                fontFamily: AppText.mono,
-              ),
-            ),
-            const SizedBox(width: AppSpace.xs),
-            Text(
-              detail,
-              style: TextStyle(
-                color: AppColors.secondary,
-                fontSize: compact ? 10 : 11,
-                fontFamily: AppText.mono,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpace.xxs),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: LinearProgressIndicator(
-            value: percent == null ? 0 : percent / 100,
-            minHeight: compact ? 7 : 9,
-            backgroundColor: AppColors.track,
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _Credits extends StatelessWidget {
-  const _Credits({this.usage});
-  final CodexUsageResponse? usage;
-  @override
-  Widget build(BuildContext c) {
-    final x = usage?.credits;
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _CardTitle('Credits'),
-          const Spacer(),
-          const Text('余额', style: TextStyle(color: AppColors.muted)),
-          Text(
-            x?.unlimited == true ? 'Unlimited' : x?.balance ?? '--',
-            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
-          ),
-          const Spacer(),
-          Text(
-            usage?.resetCredits == null
-                ? 'Reset Credits --'
-                : 'Reset Credits ×${usage!.resetCredits}',
-            style: const TextStyle(color: AppColors.purple, fontSize: 12),
-          ),
-          Text(
-            x?.hasCredits == true || x?.unlimited == true ? '状态 可用' : '状态 --',
-            style: const TextStyle(color: AppColors.muted, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Additional extends StatelessWidget {
-  const _Additional({required this.item});
-  final AdditionalLimit item;
-  @override
-  Widget build(BuildContext c) {
-    final wins = item.rateLimit.windows;
-    final w = wins.isEmpty ? null : wins.first;
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _CardTitle('附加额度', subtle: true),
-          const SizedBox(height: AppSpace.xxs),
-          Text(
-            item.displayName,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-          ),
-          const Spacer(),
-          Text(
-            '剩余 ${w?.remainingPercent?.round() ?? '--'}%',
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-          ),
-          Text(
-            '已使用 ${w?.usedPercent?.round() ?? '--'}%',
-            style: const TextStyle(color: AppColors.muted),
-          ),
-          const Spacer(),
-          Text(
-            wins
-                .map(
-                  (x) =>
-                      '${windowLabel(x.durationSeconds)} ${x.remainingPercent?.round() ?? '--'}%',
-                )
-                .join(' · '),
-            style: const TextStyle(
-              color: AppColors.cyan,
-              fontSize: 10,
-              fontFamily: AppText.mono,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _History extends ConsumerStatefulWidget {
   const _History({
     required this.range,
     required this.onRange,
+    required this.periodKind,
+    required this.onPeriodKind,
     required this.asOf,
-    this.weeklyResetAt,
+    this.refreshWindow,
     this.stamp,
   });
   final Duration range;
   final ValueChanged<Duration> onRange;
+  final HistoryPeriodKind periodKind;
+  final ValueChanged<HistoryPeriodKind> onPeriodKind;
   final DateTime asOf;
-  final DateTime? weeklyResetAt;
+  final RateWindow? refreshWindow;
   final DateTime? stamp;
 
   @override
@@ -535,8 +392,11 @@ class _History extends ConsumerStatefulWidget {
 }
 
 class _HistoryState extends ConsumerState<_History> {
-  final Map<Duration, List<QuotaSnapshot>> _cache = {};
+  final BoundedCache<String, List<QuotaSnapshot>> _cache = BoundedCache(
+    maxEntries: 8,
+  );
   List<QuotaSnapshot> _visibleRows = const [];
+  _HistoryTouchPoint? _selectedPoint;
   var _hasLoaded = false;
   var _requestId = 0;
 
@@ -549,34 +409,39 @@ class _HistoryState extends ConsumerState<_History> {
   @override
   void didUpdateWidget(covariant _History oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final oldPeriod = historyPeriodFor(
-      oldWidget.range,
-      oldWidget.asOf,
-      weeklyResetAt: oldWidget.weeklyResetAt,
-    );
-    final period = historyPeriodFor(
-      widget.range,
-      widget.asOf,
-      weeklyResetAt: widget.weeklyResetAt,
-    );
-    final crossedCalendarBoundary =
-        period.isCalendarBounded && oldPeriod.start != period.start;
+    final oldPeriod = _historyPeriodFor(oldWidget);
+    final period = _historyPeriodFor(widget);
+    final crossedFixedBoundary =
+        period?.isFixed == true && oldPeriod?.start != period?.start;
     if (oldWidget.range != widget.range ||
+        oldWidget.periodKind != widget.periodKind ||
         oldWidget.stamp != widget.stamp ||
-        crossedCalendarBoundary) {
+        crossedFixedBoundary) {
+      if (oldWidget.range != widget.range ||
+          oldWidget.periodKind != widget.periodKind ||
+          crossedFixedBoundary) {
+        _selectedPoint = null;
+      }
       unawaited(_load());
     }
   }
 
   Future<void> _load() async {
     final range = widget.range;
-    final period = historyPeriodFor(
-      range,
-      widget.asOf,
-      weeklyResetAt: widget.weeklyResetAt,
-    );
+    final periodKind = widget.periodKind;
+    final period = _historyPeriodFor(widget);
     final requestId = ++_requestId;
-    final cached = _cache[range];
+    if (period == null) {
+      if (mounted) {
+        setState(() {
+          _visibleRows = const [];
+          _hasLoaded = true;
+        });
+      }
+      return;
+    }
+    final cacheKey = historyCacheKey(period, range);
+    final cached = _cache.get(cacheKey);
     if (cached != null && !identical(cached, _visibleRows)) {
       setState(() {
         _visibleRows = cached;
@@ -588,9 +453,14 @@ class _HistoryState extends ConsumerState<_History> {
       final rows = await ref
           .read(databaseProvider)
           .snapshotsBetween(period.start, period.observedEnd(widget.asOf));
-      if (!mounted || requestId != _requestId || widget.range != range) return;
+      if (!mounted ||
+          requestId != _requestId ||
+          widget.range != range ||
+          widget.periodKind != periodKind) {
+        return;
+      }
       setState(() {
-        _cache[range] = rows;
+        _cache.put(cacheKey, rows);
         _visibleRows = rows;
         _hasLoaded = true;
       });
@@ -610,23 +480,49 @@ class _HistoryState extends ConsumerState<_History> {
             children: [
               const _CardTitle('额度剩余历史'),
               const Spacer(),
+              const _HistoryGroupLabel('滚动窗口'),
               for (final option in _ranges)
                 _RangeTab(
                   label: option.$1,
-                  selected: widget.range == option.$2,
+                  selected:
+                      widget.periodKind == HistoryPeriodKind.rolling &&
+                      widget.range == option.$2,
                   onTap: () => widget.onRange(option.$2),
                 ),
+              const _HistoryGroupDivider(),
+              const _HistoryGroupLabel('独立周期'),
+              _RangeTab(
+                label: '今天',
+                selected: widget.periodKind == HistoryPeriodKind.today,
+                onTap: () => widget.onPeriodKind(HistoryPeriodKind.today),
+              ),
+              _RangeTab(
+                label: '刷新周期内',
+                selected: widget.periodKind == HistoryPeriodKind.refreshCycle,
+                onTap: () =>
+                    widget.onPeriodKind(HistoryPeriodKind.refreshCycle),
+              ),
             ],
           ),
           const SizedBox(height: AppSpace.xs),
           Expanded(
             child: Builder(
               builder: (context) {
+                final period = _historyPeriodFor(widget);
+                if (period == null) {
+                  return const Center(
+                    child: Text(
+                      '暂无 GPT 刷新周期信息',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    ),
+                  );
+                }
+                final chartDuration = period.end.difference(period.start);
                 final rows = sample(
                   _visibleRows
                       .where((row) => row.remainingPercent != null)
                       .toList(),
-                  widget.range,
+                  chartDuration,
                 );
                 if (rows.isEmpty) {
                   return Center(
@@ -645,79 +541,147 @@ class _HistoryState extends ConsumerState<_History> {
                           ),
                   );
                 }
-                final period = historyPeriodFor(
-                  widget.range,
-                  widget.asOf,
-                  weeklyResetAt: widget.weeklyResetAt,
-                );
                 final minX = period.start.millisecondsSinceEpoch.toDouble();
                 final maxX = period.end.millisecondsSinceEpoch.toDouble();
-                final lineBars = _historyLineBars(
-                  rows,
-                  period: period,
-                  asOf: widget.asOf,
-                  range: widget.range,
-                );
-                return LineChart(
-                  LineChartData(
-                    // fl_chart does not clip a curved path by default.  With
-                    // the first/last data point on the chart edge, this could
-                    // paint the path into both neighbouring cards.
-                    clipData: const FlClipData.all(),
-                    minX: minX,
-                    maxX: maxX == minX ? minX + 1 : maxX,
-                    minY: 0,
-                    maxY: 100,
-                    gridData: FlGridData(
-                      show: true,
-                      horizontalInterval: 25,
-                      verticalInterval: ((maxX - minX).abs() / 8).clamp(
-                        1,
-                        double.infinity,
-                      ),
-                      getDrawingHorizontalLine: (_) => const FlLine(
-                        color: AppColors.divider,
-                        strokeWidth: .7,
-                      ),
-                      getDrawingVerticalLine: (_) => const FlLine(
-                        color: AppColors.divider,
-                        strokeWidth: .35,
-                      ),
-                    ),
-                    titlesData: FlTitlesData(
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 26,
-                          interval: 25,
-                          getTitlesWidget: (v, _) => Text(
-                            '${v.round()}%',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                      rightTitles: const AxisTitles(),
-                      topTitles: const AxisTitles(),
-                      bottomTitles: const AxisTitles(),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: lineBars,
-                    lineTouchData: LineTouchData(
-                      touchTooltipData: LineTouchTooltipData(
-                        getTooltipItems: (spots) => spots
+                final axisInterval = _historyAxisInterval(chartDuration);
+                final forecastEnabled =
+                    widget.periodKind == HistoryPeriodKind.refreshCycle;
+                final forecast = forecastEnabled
+                    ? forecastRemainingQuota(
+                        rows
                             .map(
-                              (spot) => LineTooltipItem(
-                                '剩余 ${spot.y.round()}%',
-                                const TextStyle(color: AppColors.text),
+                              (row) => RemainingQuotaObservation(
+                                timestamp: row.timestamp.toLocal(),
+                                remainingPercent: row.remainingPercent!,
                               ),
                             )
                             .toList(),
+                        asOf: widget.asOf,
+                        periodEnd: period.end,
+                      )
+                    : null;
+                return Stack(
+                  children: [
+                    LineChart(
+                      LineChartData(
+                        // fl_chart does not clip a curved path by default.  With
+                        // the first/last data point on the chart edge, this could
+                        // paint the path into both neighbouring cards.
+                        clipData: const FlClipData.all(),
+                        minX: minX,
+                        maxX: maxX == minX ? minX + 1 : maxX,
+                        minY: 0,
+                        maxY: 100,
+                        gridData: FlGridData(
+                          show: true,
+                          horizontalInterval: 25,
+                          verticalInterval: axisInterval,
+                          getDrawingHorizontalLine: (_) => const FlLine(
+                            color: AppColors.divider,
+                            strokeWidth: .7,
+                          ),
+                          getDrawingVerticalLine: (_) => const FlLine(
+                            color: AppColors.divider,
+                            strokeWidth: .35,
+                          ),
+                        ),
+                        titlesData: FlTitlesData(
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 26,
+                              interval: 25,
+                              getTitlesWidget: (v, _) => Text(
+                                '${v.round()}%',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                          rightTitles: const AxisTitles(),
+                          topTitles: const AxisTitles(),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 30,
+                              interval: axisInterval,
+                              getTitlesWidget: (value, meta) =>
+                                  _historyBottomTitle(
+                                    value,
+                                    meta,
+                                    period: period,
+                                    interval: axisInterval,
+                                  ),
+                            ),
+                          ),
+                        ),
+                        borderData: FlBorderData(show: false),
+                        extraLinesData: ExtraLinesData(
+                          verticalLines: [
+                            if (_selectedPoint case final selected?)
+                              VerticalLine(
+                                x: selected.timestamp.millisecondsSinceEpoch
+                                    .toDouble(),
+                                color: selected.isForecast
+                                    ? AppColors.purple
+                                    : AppColors.cyan,
+                                strokeWidth: 1,
+                                dashArray: const [3, 3],
+                              ),
+                          ],
+                        ),
+                        lineBarsData: _historyLineBars(
+                          rows,
+                          period: period,
+                          asOf: widget.asOf,
+                          range: chartDuration,
+                          forecast: forecast,
+                        ),
+                        lineTouchData: LineTouchData(
+                          touchSpotThreshold: 24,
+                          handleBuiltInTouches: false,
+                          touchCallback: _handleHistoryTouch,
+                          touchTooltipData: LineTouchTooltipData(
+                            fitInsideHorizontally: true,
+                            fitInsideVertically: true,
+                            maxContentWidth: 150,
+                            getTooltipItems: (spots) => spots
+                                .map(
+                                  (spot) => LineTooltipItem(
+                                    '${spot.bar.color == AppColors.purple ? '预测' : '记录'}时间 '
+                                    '${DateFormat('MM-dd HH:mm:ss').format(DateTime.fromMillisecondsSinceEpoch(spot.x.round()))}\n'
+                                    '剩余 ${spot.y.toStringAsFixed(1)}%',
+                                    TextStyle(
+                                      color: spot.bar.color == AppColors.purple
+                                          ? AppColors.purple
+                                          : AppColors.text,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    if (forecast != null)
+                      Positioned(
+                        top: 2,
+                        right: 4,
+                        child: IgnorePointer(
+                          child: _ForecastLegend(forecast: forecast),
+                        ),
+                      ),
+                    if (_selectedPoint case final selected?)
+                      Positioned(
+                        top: 2,
+                        left: 32,
+                        child: _HistoryTouchLabel(point: selected),
+                      ),
+                  ],
                 );
               },
             ),
@@ -725,6 +689,23 @@ class _HistoryState extends ConsumerState<_History> {
         ],
       ),
     );
+  }
+
+  void _handleHistoryTouch(FlTouchEvent event, LineTouchResponse? response) {
+    if (event is! FlTapUpEvent) return;
+    final spots = response?.lineBarSpots;
+    if (spots == null || spots.isEmpty) {
+      setState(() => _selectedPoint = null);
+      return;
+    }
+    final spot = spots.first;
+    setState(() {
+      _selectedPoint = _HistoryTouchPoint(
+        timestamp: DateTime.fromMillisecondsSinceEpoch(spot.x.round()),
+        remainingPercent: spot.y,
+        isForecast: spot.bar.color == AppColors.purple,
+      );
+    });
   }
 }
 
@@ -763,29 +744,110 @@ class _RangeTab extends StatelessWidget {
   );
 }
 
+class _HistoryGroupLabel extends StatelessWidget {
+  const _HistoryGroupLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: AppSpace.xs, right: 2),
+    child: Text(
+      label,
+      style: const TextStyle(color: AppColors.secondary, fontSize: 9),
+    ),
+  );
+}
+
+class _HistoryGroupDivider extends StatelessWidget {
+  const _HistoryGroupDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    height: 16,
+    margin: const EdgeInsets.symmetric(horizontal: 5),
+    color: AppColors.divider,
+  );
+}
+
 const _ranges = [
   ('1小时', Duration(hours: 1)),
   ('6小时', Duration(hours: 6)),
+  ('12小时', Duration(hours: 12)),
   ('24小时', Duration(hours: 24)),
   ('7天', Duration(days: 7)),
-  ('30天', Duration(days: 30)),
 ];
 
-/// Usage responses can carry several rate-limit windows. Only a window whose
-/// declared duration is approximately one week may anchor the 7-day chart.
-DateTime? _weeklyResetAt(List<RateWindow> windows) {
-  const minWeeklySeconds = 6 * 24 * 60 * 60;
-  const maxWeeklySeconds = 8 * 24 * 60 * 60;
-  for (final window in windows) {
-    final duration = window.durationSeconds;
-    if (duration != null &&
-        duration >= minWeeklySeconds &&
-        duration <= maxWeeklySeconds &&
-        window.resetAt != null) {
-      return window.resetAt;
-    }
+HistoryPeriod? _historyPeriodFor(_History widget) =>
+    switch (widget.periodKind) {
+      HistoryPeriodKind.rolling => rollingHistoryPeriod(
+        widget.range,
+        widget.asOf,
+      ),
+      HistoryPeriodKind.today => todayHistoryPeriod(widget.asOf),
+      HistoryPeriodKind.refreshCycle => refreshCycleHistoryPeriod(
+        durationSeconds: widget.refreshWindow?.durationSeconds,
+        resetAt: widget.refreshWindow?.resetAt,
+      ),
+    };
+
+double _historyAxisInterval(Duration duration) {
+  if (duration <= const Duration(hours: 1)) {
+    return const Duration(minutes: 15).inMilliseconds.toDouble();
   }
-  return null;
+  if (duration <= const Duration(hours: 6)) {
+    return const Duration(hours: 1).inMilliseconds.toDouble();
+  }
+  if (duration <= const Duration(hours: 12)) {
+    return const Duration(hours: 2).inMilliseconds.toDouble();
+  }
+  if (duration <= const Duration(days: 1)) {
+    return const Duration(hours: 4).inMilliseconds.toDouble();
+  }
+  return const Duration(days: 1).inMilliseconds.toDouble();
+}
+
+Widget _historyBottomTitle(
+  double value,
+  TitleMeta meta, {
+  required HistoryPeriod period,
+  required double interval,
+}) {
+  final nearStart = (value - meta.min).abs() < 1;
+  final nearEnd = (value - meta.max).abs() < 1;
+  if (!nearStart && !nearEnd) {
+    final tooCloseToStart = value - meta.min < interval * .45;
+    final tooCloseToEnd = meta.max - value < interval * .45;
+    if (tooCloseToStart || tooCloseToEnd) return const SizedBox.shrink();
+  }
+
+  final time = DateTime.fromMillisecondsSinceEpoch(value.round());
+  final duration = period.end.difference(period.start);
+  final label = switch (period.kind) {
+    HistoryPeriodKind.today =>
+      nearEnd ? '24:00' : DateFormat('HH:mm').format(time),
+    HistoryPeriodKind.refreshCycle =>
+      duration <= const Duration(hours: 12)
+          ? DateFormat('HH:mm').format(time)
+          : DateFormat('MM-dd\nHH:mm').format(time),
+    HistoryPeriodKind.rolling =>
+      duration <= const Duration(hours: 12)
+          ? DateFormat('HH:mm').format(time)
+          : duration <= const Duration(days: 1)
+          ? DateFormat('MM-dd\nHH:mm').format(time)
+          : DateFormat('MM-dd').format(time),
+  };
+  return SideTitleWidget(
+    meta: meta,
+    space: 5,
+    fitInside: SideTitleFitInsideData.fromTitleMeta(meta, distanceFromEdge: 2),
+    child: Text(
+      label,
+      textAlign: TextAlign.center,
+      style: const TextStyle(color: AppColors.muted, fontSize: 8, height: 1.1),
+    ),
+  );
 }
 
 List<QuotaSnapshot> sample(List<QuotaSnapshot> rows, Duration range) {
@@ -812,6 +874,7 @@ List<LineChartBarData> _historyLineBars(
   required HistoryPeriod period,
   required DateTime asOf,
   required Duration range,
+  RemainingQuotaForecast? forecast,
 }) {
   final observedEnd = period.observedEnd(asOf);
   final points = rows
@@ -865,7 +928,7 @@ List<LineChartBarData> _historyLineBars(
   }
   final end = FlSpot(period.end.millisecondsSinceEpoch.toDouble(), observed.y);
   if (observed.x < end.x) dashed.add(_dashedHistoryLine([observed, end]));
-  return [...dashed, ...solid];
+  return [...dashed, ...solid, if (forecast != null) _forecastLine(forecast)];
 }
 
 Duration _historyGapThreshold(Duration range) {
@@ -898,6 +961,106 @@ LineChartBarData _solidHistoryLine(List<FlSpot> spots) => LineChartBarData(
     color: AppColors.cyan.withValues(alpha: .07),
   ),
 );
+
+LineChartBarData _forecastLine(RemainingQuotaForecast forecast) =>
+    LineChartBarData(
+      spots: [
+        FlSpot(
+          forecast.start.millisecondsSinceEpoch.toDouble(),
+          forecast.startPercent,
+        ),
+        FlSpot(
+          forecast.end.millisecondsSinceEpoch.toDouble(),
+          forecast.endPercent,
+        ),
+      ],
+      color: AppColors.purple,
+      isCurved: false,
+      barWidth: 2,
+      dashArray: const [5, 4],
+      dotData: const FlDotData(show: false),
+    );
+
+class _ForecastLegend extends StatelessWidget {
+  const _ForecastLegend({required this.forecast});
+
+  final RemainingQuotaForecast forecast;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: AppColors.card.withValues(alpha: .9),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 12, height: 2, color: AppColors.purple),
+          const SizedBox(width: 4),
+          Text(
+            '趋势预测 ${forecast.percentPointsPerHour.abs().toStringAsFixed(1)}%/小时',
+            style: const TextStyle(
+              color: AppColors.purple,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _HistoryTouchPoint {
+  const _HistoryTouchPoint({
+    required this.timestamp,
+    required this.remainingPercent,
+    required this.isForecast,
+  });
+
+  final DateTime timestamp;
+  final double remainingPercent;
+  final bool isForecast;
+}
+
+class _HistoryTouchLabel extends StatelessWidget {
+  const _HistoryTouchLabel({required this.point});
+
+  final _HistoryTouchPoint point;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = point.isForecast ? AppColors.purple : AppColors.cyan;
+    return Semantics(
+      label:
+          '${point.isForecast ? '预测' : '记录'}时间 '
+          '${DateFormat('yyyy-MM-dd HH:mm:ss').format(point.timestamp)}，'
+          '剩余 ${point.remainingPercent.toStringAsFixed(1)}%',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppColors.card.withValues(alpha: .94),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: color.withValues(alpha: .55)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          child: Text(
+            '${point.isForecast ? '预测' : '记录'} '
+            '${DateFormat('MM-dd HH:mm:ss').format(point.timestamp)}  '
+            '剩余 ${point.remainingPercent.toStringAsFixed(1)}%',
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _Events extends StatelessWidget {
   const _Events({required this.events});

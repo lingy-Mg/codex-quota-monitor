@@ -45,6 +45,8 @@ class CodexApiService {
   final NetworkProxyService _proxyService;
   NetworkProxy? _activeProxy;
 
+  void close({bool force = false}) => _dio.close(force: force);
+
   String _findProxy(Uri uri) => _activeProxy?.findProxy(uri) ?? 'DIRECT';
 
   Future<void> _refreshProxy() async {
@@ -72,7 +74,26 @@ class CodexApiService {
     final data = response.data is String
         ? jsonDecode(response.data as String)
         : response.data;
-    return CodexUsageResponse.fromJson(data);
+    dynamic resetDetails;
+    try {
+      final details = await _dio.get(
+        CodexEndpoints.resetCredits,
+        options: _options(c),
+      );
+      if (details.statusCode == 401) throw _failure(details);
+      if (details.statusCode == 200) {
+        resetDetails = details.data is String
+            ? jsonDecode(details.data as String)
+            : details.data;
+      }
+    } on ApiException {
+      rethrow;
+    } on DioException {
+      // Quota monitoring stays available when only card details fail.
+    } on FormatException {
+      // Missing detail data is shown explicitly, never as zero cards.
+    }
+    return CodexUsageResponse.fromJson(data, resetDetails: resetDetails);
   }
 
   Future<CodexCredentials> refresh(CodexCredentials c) async {

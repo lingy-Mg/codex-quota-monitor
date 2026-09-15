@@ -35,7 +35,11 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 1;
 
-  Future<void> saveUsage(CodexUsageResponse usage, DateTime at) async {
+  Future<void> saveUsage(
+    CodexUsageResponse usage,
+    DateTime at, {
+    int retentionDays = 60,
+  }) async {
     await transaction(() async {
       Future<void> add(String id, String name, CodexRateLimit limit) async {
         for (var i = 0; i < limit.windows.length; i++) {
@@ -101,7 +105,7 @@ class AppDatabase extends _$AppDatabase {
       }
       await (delete(quotaSnapshots)..where(
             (t) => t.timestamp.isSmallerThanValue(
-              DateTime.now().toUtc().subtract(const Duration(days: 60)),
+              DateTime.now().toUtc().subtract(Duration(days: retentionDays)),
             ),
           ))
           .go();

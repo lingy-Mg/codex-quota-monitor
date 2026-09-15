@@ -167,13 +167,17 @@ class CodexUsageResponse {
     required this.additional,
     this.credits,
     this.resetCredits,
+    this.resetCards,
   });
   final String? planType;
   final CodexRateLimit rateLimit;
   final List<AdditionalLimit> additional;
   final CodexCredits? credits;
   final int? resetCredits;
-  factory CodexUsageResponse.fromJson(dynamic json) {
+
+  /// Null means the detail endpoint was unavailable; an empty list is known empty.
+  final List<ResetCredit>? resetCards;
+  factory CodexUsageResponse.fromJson(dynamic json, {dynamic resetDetails}) {
     final map = json is Map
         ? Map<String, dynamic>.from(json)
         : const <String, dynamic>{};
@@ -184,12 +188,54 @@ class CodexUsageResponse {
       rateLimit: CodexRateLimit.fromJson(map['rate_limit']),
       additional: extra is List
           ? extra.map(AdditionalLimit.fromJson).toList()
+          : extra is Map
+          ? (extra.containsKey('rate_limit')
+                ? [AdditionalLimit.fromJson(extra)]
+                : extra.entries.where((e) => e.value is Map).map((e) {
+                    final item = Map<String, dynamic>.from(e.value as Map);
+                    item.putIfAbsent('limit_name', () => e.key.toString());
+                    return AdditionalLimit.fromJson(item);
+                  }).toList())
           : const [],
       credits: map.containsKey('credits')
           ? CodexCredits.fromJson(map['credits'])
           : null,
-      resetCredits: reset is Map ? integer(reset['available_count']) : null,
+      resetCredits: resetDetails is Map
+          ? integer(resetDetails['available_count']) ??
+                (reset is Map ? integer(reset['available_count']) : null)
+          : reset is Map
+          ? integer(reset['available_count'])
+          : null,
+      resetCards: resetDetails is Map && resetDetails['credits'] is List
+          ? (resetDetails['credits'] as List)
+                .whereType<Map>()
+                .map(ResetCredit.fromJson)
+                .where((card) => card.status == 'available')
+                .toList()
+          : null,
     );
+  }
+}
+
+class ResetCredit {
+  const ResetCredit({this.expiresAt, this.status, this.supportedByPlan});
+
+  final DateTime? expiresAt;
+  final String? status;
+  final bool? supportedByPlan;
+
+  factory ResetCredit.fromJson(Map json) => ResetCredit(
+    expiresAt: DateTime.tryParse('${json['expires_at'] ?? ''}')?.toUtc(),
+    status: json['status']?.toString(),
+    supportedByPlan: json['is_supported_by_plan'] as bool?,
+  );
+
+  String expiryLabel(DateTime now) {
+    if (expiresAt == null) return '到期时间未知';
+    final remaining = expiresAt!.difference(now);
+    if (remaining <= Duration.zero) return '已到期';
+    if (remaining.inDays == 0) return '不足1天';
+    return '${remaining.inDays}天';
   }
 }
 

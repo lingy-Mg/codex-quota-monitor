@@ -3,6 +3,52 @@ import 'package:codex_quota_monitor/core/models.dart';
 
 void main() {
   group('usage response parsing', () {
+    test('reset cards retain expiry and exclude redeemed cards', () {
+      final usage = CodexUsageResponse.fromJson(
+        {},
+        resetDetails: {
+          'available_count': 2,
+          'credits': [
+            {'status': 'available', 'expires_at': '2026-09-18T12:00:00Z'},
+            {'status': 'available', 'expires_at': 'invalid'},
+            {'status': 'redeemed', 'expires_at': '2026-09-20T12:00:00Z'},
+          ],
+        },
+      );
+      expect(usage.resetCredits, 2);
+      expect(usage.resetCards, hasLength(2));
+      final card = usage.resetCards!.first;
+      expect(card.expiryLabel(DateTime.utc(2026, 9, 15, 12)), '3天');
+      expect(card.expiryLabel(DateTime.utc(2026, 9, 18)), '不足1天');
+      expect(card.expiryLabel(DateTime.utc(2026, 9, 18, 12)), '已到期');
+      expect(usage.resetCards!.last.expiresAt, isNull);
+      expect(usage.resetCards!.last.expiryLabel(DateTime.now()), '到期时间未知');
+      expect(CodexUsageResponse.fromJson({}).resetCards, isNull);
+    });
+
+    test('additional quotas accept named maps as well as lists', () {
+      final usage = CodexUsageResponse.fromJson({
+        'additional_rate_limits': {
+          'gpt-reserve': {
+            'rate_limit': {
+              'primary_window': {'used_percent': 12},
+            },
+          },
+          'GPT-5.3-Codex-Spark': {
+            'rate_limit': {
+              'primary_window': {'used_percent': 20},
+            },
+          },
+        },
+      });
+      expect(usage.additional, hasLength(2));
+      expect(usage.additional.first.displayName, 'gpt-reserve');
+      expect(
+        usage.additional.first.rateLimit.windows.single.remainingPercent,
+        88,
+      );
+    });
+
     test(
       'used percent is converted to remaining percent and windows are sorted',
       () {

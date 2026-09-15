@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -51,9 +52,17 @@ class DashboardState {
   );
 }
 
-final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
+final databaseProvider = Provider<AppDatabase>((ref) {
+  final database = AppDatabase();
+  ref.onDispose(database.close);
+  return database;
+});
 final credentialsProvider = Provider<CredentialStore>((_) => CredentialStore());
-final apiProvider = Provider<CodexApiService>((_) => CodexApiService());
+final apiProvider = Provider<CodexApiService>((ref) {
+  final api = CodexApiService();
+  ref.onDispose(() => api.close(force: true));
+  return api;
+});
 final settingsProvider = AsyncNotifierProvider<SettingsController, AppSettings>(
   SettingsController.new,
 );
@@ -87,8 +96,10 @@ class MonitorController extends AsyncNotifier<DashboardState> {
   Future<DashboardState> build() async {
     final credentials = await _store.read();
     final last = await _db.lastSnapshot();
+    final lastUsage = last == null ? null : _usageFromSnapshot(last);
     final initial = DashboardState(
       credentials: credentials,
+      usage: lastUsage,
       lastSync: last?.timestamp.toLocal(),
       health: credentials == null
           ? MonitorHealth.auth
@@ -185,7 +196,11 @@ class MonitorController extends AsyncNotifier<DashboardState> {
         }
       }
       final now = DateTime.now();
-      await _db.saveUsage(usage, now);
+      await _db.saveUsage(
+        usage,
+        now,
+        retentionDays: ref.read(settingsProvider).value?.historyDays ?? 60,
+      );
       _failures = 0;
       state = AsyncData(
         (state.value ?? const DashboardState()).copyWith(
@@ -272,5 +287,22 @@ class MonitorController extends AsyncNotifier<DashboardState> {
       await WakelockPlus.disable();
     }
     await BootMonitorService.setEnabled(values.bootMonitoring);
+    await SystemChrome.setEnabledSystemUIMode(
+      values.immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+    );
   }
 }
+
+CodexUsageResponse _usageFromSnapshot(QuotaSnapshot snapshot) =>
+    CodexUsageResponse.fromJson({
+      'plan_type': snapshot.planType,
+      'rate_limit': {
+        'primary_window': {
+          'used_percent': snapshot.usedPercent,
+          'limit_window_seconds': snapshot.windowDurationSeconds,
+          'reset_at': snapshot.resetAt == null
+              ? null
+              : snapshot.resetAt!.millisecondsSinceEpoch ~/ 1000,
+        },
+      },
+    });

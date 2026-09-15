@@ -26,6 +26,15 @@ class MonitoringService : Service() {
         super.onCreate()
         createChannel(this)
         startForeground(notificationId, notification(this, "监控运行中 · 等待同步"))
+        serviceReady = true
+        // Android can restore this service from MY_PACKAGE_REPLACED just as the
+        // Activity becomes visible. Let the service reach startForeground()
+        // before stopping it; stopping during that window causes a platform
+        // ForegroundServiceDidNotStartInTimeException.
+        if (appVisible) {
+            stopSelf()
+            return
+        }
         engine = FlutterEngine(applicationContext).also { flutterEngine ->
             GeneratedPluginRegistrant.registerWith(flutterEngine)
             val entrypoint = DartExecutor.DartEntrypoint(
@@ -36,9 +45,17 @@ class MonitoringService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (appVisible) stopSelfResult(startId)
+        return if (appVisible) START_NOT_STICKY else START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onDestroy() { engine?.destroy(); engine = null; super.onDestroy() }
+    override fun onDestroy() {
+        serviceReady = false
+        engine?.destroy()
+        engine = null
+        super.onDestroy()
+    }
 
     companion object {
         const val preferencesName = "codex_monitor_native"
@@ -46,7 +63,27 @@ class MonitoringService : Service() {
         private const val channelId = "codex_monitor_background"
         private const val notificationId = 4101
 
+        @Volatile
+        var appVisible: Boolean = false
+            private set
+
+        @Volatile
+        private var serviceReady: Boolean = false
+
+        fun setAppVisible(context: Context, visible: Boolean) {
+            appVisible = visible
+            if (visible) {
+                if (serviceReady) stop(context)
+                return
+            }
+            val enabled = context
+                .getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
+                .getBoolean(enabledKey, false)
+            if (enabled) start(context)
+        }
+
         fun start(context: Context) {
+            if (appVisible) return
             val intent = Intent(context, MonitoringService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
         }
