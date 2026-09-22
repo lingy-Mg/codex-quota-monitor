@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.GeneratedPluginRegistrant
 
 /**
@@ -37,6 +38,21 @@ class MonitoringService : Service() {
         }
         engine = FlutterEngine(applicationContext).also { flutterEngine ->
             GeneratedPluginRegistrant.registerWith(flutterEngine)
+            MethodChannel(
+                flutterEngine.dartExecutor.binaryMessenger,
+                "codex_monitor/foreground_monitor"
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "updateNotification" -> {
+                        updateNotification(
+                            applicationContext,
+                            call.argument<String>("remaining") ?: "--"
+                        )
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
             val entrypoint = DartExecutor.DartEntrypoint(
                 FlutterInjector.instance().flutterLoader().findAppBundlePath(),
                 "bootMonitorEntrypoint"
@@ -60,6 +76,7 @@ class MonitoringService : Service() {
     companion object {
         const val preferencesName = "codex_monitor_native"
         const val enabledKey = "boot_monitoring_enabled"
+        const val webServerEnabledKey = "web_server_enabled"
         private const val channelId = "codex_monitor_background"
         private const val notificationId = 4101
 
@@ -76,9 +93,9 @@ class MonitoringService : Service() {
                 if (serviceReady) stop(context)
                 return
             }
-            val enabled = context
-                .getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
-                .getBoolean(enabledKey, false)
+            val preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
+            val enabled = preferences.getBoolean(enabledKey, false) ||
+                preferences.getBoolean(webServerEnabledKey, false)
             if (enabled) start(context)
         }
 

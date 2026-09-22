@@ -11,6 +11,7 @@ import '../database/app_database.dart';
 import '../services/codex_api_service.dart';
 import '../services/boot_monitor_service.dart';
 import '../services/device_service.dart';
+import '../services/web_dashboard_server.dart';
 import 'settings.dart';
 
 enum MonitorHealth { live, offline, auth, loading }
@@ -73,6 +74,21 @@ final dashboardProvider =
 final historyProvider = FutureProvider.family<List<QuotaSnapshot>, Duration>(
   (ref, duration) => ref.read(databaseProvider).snapshots(duration),
 );
+final webDashboardServerProvider = Provider<WebDashboardServer>((ref) {
+  final server = WebDashboardServer(ref.read(databaseProvider), () {
+    final dashboard = ref.read(dashboardProvider).value;
+    final settings = ref.read(settingsProvider).value ?? const AppSettings();
+    return WebDashboardData(
+      health: dashboard?.health.name ?? MonitorHealth.loading.name,
+      refreshSeconds: settings.refreshSeconds,
+      usage: dashboard?.usage,
+      lastSync: dashboard?.lastSync,
+      device: dashboard?.device,
+    );
+  });
+  ref.onDispose(() => unawaited(server.stop()));
+  return server;
+});
 
 class SettingsController extends AsyncNotifier<AppSettings> {
   @override
@@ -96,7 +112,7 @@ class MonitorController extends AsyncNotifier<DashboardState> {
   Future<DashboardState> build() async {
     final credentials = await _store.read();
     final last = await _db.lastSnapshot();
-    final lastUsage = last == null ? null : _usageFromSnapshot(last);
+    final lastUsage = last == null ? null : usageFromSnapshot(last);
     final initial = DashboardState(
       credentials: credentials,
       usage: lastUsage,
@@ -106,8 +122,18 @@ class MonitorController extends AsyncNotifier<DashboardState> {
           : (last == null ? MonitorHealth.loading : MonitorHealth.offline),
       events: await _db.recentEvents(),
     );
+    final settings = await ref.read(settingsProvider.future);
+    unawaited(
+      ref
+          .read(webDashboardServerProvider)
+          .configure(settings.webServerEnabled)
+          .catchError((_) {}),
+    );
     _connectivity = Connectivity().onConnectivityChanged.listen((result) {
-      if (!result.contains(ConnectivityResult.none)) refresh();
+      if (!result.contains(ConnectivityResult.none)) {
+        unawaited(_updateDevice());
+        refresh();
+      }
     });
     _deviceTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -281,19 +307,25 @@ class MonitorController extends AsyncNotifier<DashboardState> {
   }
 
   Future<void> applyDisplay(AppSettings values) async {
+    await ref
+        .read(webDashboardServerProvider)
+        .configure(values.webServerEnabled);
     if (values.keepAwake) {
       await WakelockPlus.enable();
     } else {
       await WakelockPlus.disable();
     }
-    await BootMonitorService.setEnabled(values.bootMonitoring);
+    await BootMonitorService.configure(
+      bootMonitoring: values.bootMonitoring,
+      webServerEnabled: values.webServerEnabled,
+    );
     await SystemChrome.setEnabledSystemUIMode(
       values.immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
     );
   }
 }
 
-CodexUsageResponse _usageFromSnapshot(QuotaSnapshot snapshot) =>
+CodexUsageResponse usageFromSnapshot(QuotaSnapshot snapshot) =>
     CodexUsageResponse.fromJson({
       'plan_type': snapshot.planType,
       'rate_limit': {

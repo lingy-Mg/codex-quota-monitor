@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import '../core/models.dart' hide integer;
+import '../core/project_storage.dart';
 
 part 'app_database.g.dart';
 
@@ -30,7 +31,17 @@ class ActivityEvents extends Table {
 
 @DriftDatabase(tables: [QuotaSnapshots, ActivityEvents])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(driftDatabase(name: 'codex_monitor'));
+  AppDatabase()
+    : super(
+        driftDatabase(
+          name: 'codex_monitor',
+          native: ProjectStorage.usesProjectRoot
+              ? DriftNativeOptions(
+                  databasePath: () async => ProjectStorage.databasePath,
+                )
+              : null,
+        ),
+      );
   AppDatabase.forTesting(super.e);
   @override
   int get schemaVersion => 1;

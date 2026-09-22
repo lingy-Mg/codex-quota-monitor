@@ -292,6 +292,10 @@ class _Header extends StatelessWidget {
                           '网络 ${health == MonitorHealth.live ? '在线' : label}',
                     ),
                     _HeaderStatus(
+                      icon: Icons.wifi_outlined,
+                      label: 'Wi-Fi ${state.device?.wifiIp ?? '--'}',
+                    ),
+                    _HeaderStatus(
                       icon: Icons.refresh_rounded,
                       label: '自动刷新 ${refresh}s',
                     ),

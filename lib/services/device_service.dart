@@ -7,12 +7,14 @@ class DeviceStatus {
     required this.full,
     this.memoryMb = 0,
     this.temperature,
+    this.wifiIp,
   });
   final Duration uptime;
   final bool charging;
   final bool full;
   final double memoryMb;
   final double? temperature;
+  final String? wifiIp;
 }
 
 class DeviceService {
@@ -25,6 +27,7 @@ class DeviceService {
       full: raw?['full'] as bool? ?? false,
       memoryMb: (raw?['memoryMb'] as num?)?.toDouble() ?? 0,
       temperature: (raw?['temperatureC'] as num?)?.toDouble(),
+      wifiIp: raw?['wifiIp'] as String?,
     );
   }
 }

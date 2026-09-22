@@ -15,6 +15,7 @@ import 'features/dashboard/dashboard_page.dart';
 import 'services/boot_monitor_service.dart';
 import 'services/codex_api_service.dart';
 import 'services/adb_credential_import.dart';
+import 'services/web_dashboard_server.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +48,19 @@ void bootMonitorEntrypoint() {
   final store = CredentialStore();
   final api = CodexApiService();
   var pollInProgress = false;
+  CodexUsageResponse? latestUsage;
+  DateTime? latestSync;
+  var health = MonitorHealth.offline;
+  final webServer = WebDashboardServer(database, () async {
+    final settings = await AppSettings.load();
+    final last = latestUsage == null ? await database.lastSnapshot() : null;
+    return WebDashboardData(
+      health: health.name,
+      refreshSeconds: settings.refreshSeconds,
+      usage: latestUsage ?? (last == null ? null : usageFromSnapshot(last)),
+      lastSync: latestSync ?? last?.timestamp.toLocal(),
+    );
+  });
 
   Future<void> poll() async {
     if (pollInProgress) return;
@@ -70,11 +84,15 @@ void bootMonitorEntrypoint() {
         DateTime.now(),
         retentionDays: settings.historyDays,
       );
+      latestUsage = usage;
+      latestSync = DateTime.now();
+      health = MonitorHealth.live;
       final remaining = usage.rateLimit.windows.isEmpty
           ? '--'
           : '${usage.rateLimit.windows.first.remainingPercent?.round() ?? '--'}%';
       await BootMonitorService.publishRemaining(remaining);
     } catch (_) {
+      health = MonitorHealth.offline;
       // Failure is intentionally silent here: retry follows the configured
       // cadence and no request metadata/credentials are persisted or logged.
     } finally {
@@ -83,12 +101,12 @@ void bootMonitorEntrypoint() {
   }
 
   unawaited(poll());
-  AppSettings.load().then(
-    (settings) => Timer.periodic(
-      Duration(seconds: settings.refreshSeconds),
-      (_) => poll(),
-    ),
-  );
+  AppSettings.load().then((settings) {
+    if (settings.webServerEnabled) {
+      unawaited(webServer.start().catchError((_) {}));
+    }
+    Timer.periodic(Duration(seconds: settings.refreshSeconds), (_) => poll());
+  });
 }
 
 class CodexMonitorApp extends ConsumerStatefulWidget {

@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/monitor_controller.dart';
 import '../../app/settings.dart';
 import '../../app/theme.dart';
 import '../../services/diagnostics_service.dart';
+import '../../services/web_dashboard_server.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -68,6 +70,23 @@ class SettingsPage extends ConsumerWidget {
     Future<void> set(AppSettings s) async {
       await ref.read(settingsProvider.notifier).saveSettings(s);
       await ref.read(dashboardProvider.notifier).applyDisplay(s);
+    }
+
+    final webAddress =
+        'http://${dashboard?.device?.wifiIp ?? '平板 Wi-Fi IP'}:$webDashboardPort';
+
+    Future<void> setWebServer(bool enabled) async {
+      try {
+        await ref.read(webDashboardServerProvider).configure(enabled);
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Web 服务器启动失败，请检查端口是否被占用')),
+          );
+        }
+        return;
+      }
+      await set(settings.copyWith(webServerEnabled: enabled));
     }
 
     return Scaffold(
@@ -153,6 +172,39 @@ class SettingsPage extends ConsumerWidget {
             value: settings.bootMonitoring,
             onChanged: (v) => set(settings.copyWith(bootMonitoring: v)),
           ),
+          const _Title('Web 服务器'),
+          SwitchListTile(
+            title: const Text('允许局域网 Web 查看'),
+            subtitle: const Text('只读展示完整仪表盘；开启后由前台服务保持后台运行'),
+            value: settings.webServerEnabled,
+            onChanged: setWebServer,
+          ),
+          if (settings.webServerEnabled)
+            ListTile(
+              title: const Text('电脑访问地址'),
+              subtitle: Text(
+                webAddress,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              leading: const Icon(Icons.lan_outlined),
+              trailing: IconButton(
+                tooltip: '复制地址',
+                icon: const Icon(Icons.copy_outlined),
+                onPressed: dashboard?.device?.wifiIp == null
+                    ? null
+                    : () async {
+                        await Clipboard.setData(
+                          ClipboardData(text: webAddress),
+                        );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Web 地址已复制')),
+                          );
+                        }
+                      },
+              ),
+            ),
           const _Title('历史数据'),
           DropdownButtonFormField<int>(
             initialValue: settings.historyDays,

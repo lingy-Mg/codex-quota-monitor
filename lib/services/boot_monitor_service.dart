@@ -6,8 +6,13 @@ import 'package:flutter/services.dart';
 class BootMonitorService {
   static const _channel = MethodChannel('codex_monitor/foreground_monitor');
 
-  static Future<void> setEnabled(bool enabled) =>
-      _channel.invokeMethod<void>('setEnabled', {'enabled': enabled});
+  static Future<void> configure({
+    required bool bootMonitoring,
+    required bool webServerEnabled,
+  }) => _channel.invokeMethod<void>('setModes', {
+    'bootMonitoring': bootMonitoring,
+    'webServerEnabled': webServerEnabled,
+  });
 
   static Future<void> publishRemaining(String text) =>
       _channel.invokeMethod<void>('updateNotification', {'remaining': text});

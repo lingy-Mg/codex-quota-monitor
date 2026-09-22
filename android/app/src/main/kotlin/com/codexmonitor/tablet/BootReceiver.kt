@@ -8,8 +8,9 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-        val enabled = context.getSharedPreferences(MonitoringService.preferencesName, Context.MODE_PRIVATE)
-            .getBoolean(MonitoringService.enabledKey, false)
+        val preferences = context.getSharedPreferences(MonitoringService.preferencesName, Context.MODE_PRIVATE)
+        val enabled = preferences.getBoolean(MonitoringService.enabledKey, false) ||
+            preferences.getBoolean(MonitoringService.webServerEnabledKey, false)
         if (enabled) MonitoringService.start(context)
     }
 }
