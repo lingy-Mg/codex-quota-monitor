@@ -15,7 +15,43 @@ class HistoryPeriod {
   bool get isFixed => kind != HistoryPeriodKind.rolling;
 
   /// The part of this period for which a real observation could exist.
-  DateTime observedEnd(DateTime now) => now.isBefore(end) ? now : end;
+  DateTime observedEnd(DateTime now) {
+    if (now.isBefore(start)) return start;
+    return now.isBefore(end) ? now : end;
+  }
+}
+
+const timelineMinimumStep = Duration(hours: 1);
+
+/// Moves a chart viewport without changing its duration or semantic kind.
+/// There is deliberately no date boundary clamp: the timeline may be explored
+/// indefinitely in either direction, including periods that contain no rows.
+HistoryPeriod shiftHistoryPeriod(HistoryPeriod period, Duration offset) =>
+    HistoryPeriod(
+      start: period.start.add(offset),
+      end: period.end.add(offset),
+      kind: period.kind,
+    );
+
+/// Converts a horizontal drag into whole-hour viewport steps. Dragging the
+/// content right reveals earlier time; dragging it left reveals later time.
+int timelineHourShiftForDrag({
+  required double dragDistance,
+  required double viewportWidth,
+  required Duration visibleDuration,
+}) {
+  if (!dragDistance.isFinite ||
+      !viewportWidth.isFinite ||
+      viewportWidth <= 0 ||
+      visibleDuration <= Duration.zero) {
+    return 0;
+  }
+  final hours =
+      -dragDistance /
+      viewportWidth *
+      visibleDuration.inMilliseconds /
+      timelineMinimumStep.inMilliseconds;
+  return hours.round();
 }
 
 /// A rolling window always means "from [range] ago until now".

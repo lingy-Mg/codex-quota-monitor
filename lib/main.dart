@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'app/monitor_controller.dart';
+import 'app/reset_alert_controller.dart';
 import 'app/theme.dart';
 import 'app/settings.dart';
 import 'core/security.dart';
@@ -12,6 +13,7 @@ import 'core/models.dart';
 import 'database/app_database.dart';
 import 'features/auth/configuration_page.dart';
 import 'features/dashboard/dashboard_page.dart';
+import 'features/reset_alert/reset_alert_overlay.dart';
 import 'services/boot_monitor_service.dart';
 import 'services/codex_api_service.dart';
 import 'services/adb_credential_import.dart';
@@ -155,6 +157,7 @@ class _CodexMonitorAppState extends ConsumerState<CodexMonitorApp>
         unawaited(ref.read(dashboardProvider.notifier).applyDisplay(settings));
       }
       ref.read(dashboardProvider.notifier).refresh();
+      ref.read(resetAlertProvider.notifier).refresh();
     }
   }
 
@@ -172,6 +175,8 @@ class _CodexMonitorAppState extends ConsumerState<CodexMonitorApp>
       debugShowCheckedModeBanner: false,
       title: 'Codex 额度监控',
       theme: monitorTheme(),
+      builder: (context, child) =>
+          ResetAlertHost(child: child ?? const SizedBox.shrink()),
       home: configured ? const DashboardPage() : const ConfigurationPage(),
     );
   }

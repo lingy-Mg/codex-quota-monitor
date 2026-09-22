@@ -401,6 +401,11 @@ class _HistoryState extends ConsumerState<_History> {
   );
   List<QuotaSnapshot> _visibleRows = const [];
   _HistoryTouchPoint? _selectedPoint;
+  Timer? _panLoadDebounce;
+  Duration _timelineOffset = Duration.zero;
+  Duration _dragStartOffset = Duration.zero;
+  double _dragDistance = 0;
+  var _isDragging = false;
   var _hasLoaded = false;
   var _requestId = 0;
 
@@ -411,19 +416,26 @@ class _HistoryState extends ConsumerState<_History> {
   }
 
   @override
+  void dispose() {
+    _panLoadDebounce?.cancel();
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant _History oldWidget) {
     super.didUpdateWidget(oldWidget);
     final oldPeriod = _historyPeriodFor(oldWidget);
     final period = _historyPeriodFor(widget);
     final crossedFixedBoundary =
         period?.isFixed == true && oldPeriod?.start != period?.start;
-    if (oldWidget.range != widget.range ||
-        oldWidget.periodKind != widget.periodKind ||
+    final selectionChanged =
+        oldWidget.range != widget.range ||
+        oldWidget.periodKind != widget.periodKind;
+    if (selectionChanged ||
         oldWidget.stamp != widget.stamp ||
         crossedFixedBoundary) {
-      if (oldWidget.range != widget.range ||
-          oldWidget.periodKind != widget.periodKind ||
-          crossedFixedBoundary) {
+      if (selectionChanged || crossedFixedBoundary) {
+        _timelineOffset = Duration.zero;
         _selectedPoint = null;
       }
       unawaited(_load());
@@ -433,7 +445,8 @@ class _HistoryState extends ConsumerState<_History> {
   Future<void> _load() async {
     final range = widget.range;
     final periodKind = widget.periodKind;
-    final period = _historyPeriodFor(widget);
+    final timelineOffset = _timelineOffset;
+    final period = _visibleHistoryPeriod;
     final requestId = ++_requestId;
     if (period == null) {
       if (mounted) {
@@ -444,7 +457,7 @@ class _HistoryState extends ConsumerState<_History> {
       }
       return;
     }
-    final cacheKey = historyCacheKey(period, range);
+    final cacheKey = _timelineCacheKey(period, range, timelineOffset);
     final cached = _cache.get(cacheKey);
     if (cached != null && !identical(cached, _visibleRows)) {
       setState(() {
@@ -460,7 +473,8 @@ class _HistoryState extends ConsumerState<_History> {
       if (!mounted ||
           requestId != _requestId ||
           widget.range != range ||
-          widget.periodKind != periodKind) {
+          widget.periodKind != periodKind ||
+          _timelineOffset != timelineOffset) {
         return;
       }
       setState(() {
@@ -474,6 +488,56 @@ class _HistoryState extends ConsumerState<_History> {
     }
   }
 
+  HistoryPeriod? get _visibleHistoryPeriod {
+    final period = _historyPeriodFor(widget);
+    return period == null ? null : shiftHistoryPeriod(period, _timelineOffset);
+  }
+
+  void _startTimelineDrag(DragStartDetails details) {
+    _panLoadDebounce?.cancel();
+    _dragStartOffset = _timelineOffset;
+    _dragDistance = 0;
+    setState(() {
+      _isDragging = true;
+      _selectedPoint = null;
+    });
+  }
+
+  void _updateTimelineDrag(DragUpdateDetails details, double width) {
+    _dragDistance += details.delta.dx;
+    final period = _historyPeriodFor(widget);
+    if (period == null) return;
+    final hours = timelineHourShiftForDrag(
+      dragDistance: _dragDistance,
+      viewportWidth: width,
+      visibleDuration: period.end.difference(period.start),
+    );
+    final next = _dragStartOffset + Duration(hours: hours);
+    if (next == _timelineOffset) return;
+    setState(() => _timelineOffset = next);
+    _panLoadDebounce?.cancel();
+    _panLoadDebounce = Timer(
+      const Duration(milliseconds: 120),
+      () => unawaited(_load()),
+    );
+  }
+
+  void _endTimelineDrag() {
+    _panLoadDebounce?.cancel();
+    if (_isDragging) setState(() => _isDragging = false);
+    unawaited(_load());
+  }
+
+  void _returnToCurrentPeriod() {
+    _panLoadDebounce?.cancel();
+    setState(() {
+      _timelineOffset = Duration.zero;
+      _selectedPoint = null;
+      _isDragging = false;
+    });
+    unawaited(_load());
+  }
+
   @override
   Widget build(BuildContext c) {
     return _Card(
@@ -484,6 +548,13 @@ class _HistoryState extends ConsumerState<_History> {
             children: [
               const _CardTitle('额度剩余历史'),
               const Spacer(),
+              if (_timelineOffset != Duration.zero)
+                _RangeTab(
+                  key: const ValueKey('history-timeline-now'),
+                  label: '回到现在',
+                  selected: false,
+                  onTap: _returnToCurrentPeriod,
+                ),
               const _HistoryGroupLabel('滚动窗口'),
               for (final option in _ranges)
                 _RangeTab(
@@ -512,7 +583,7 @@ class _HistoryState extends ConsumerState<_History> {
           Expanded(
             child: Builder(
               builder: (context) {
-                final period = _historyPeriodFor(widget);
+                final period = _visibleHistoryPeriod;
                 if (period == null) {
                   return const Center(
                     child: Text(
@@ -528,23 +599,6 @@ class _HistoryState extends ConsumerState<_History> {
                       .toList(),
                   chartDuration,
                 );
-                if (rows.isEmpty) {
-                  return Center(
-                    child: _hasLoaded
-                        ? const Text(
-                            '暂无已记录的额度数据',
-                            style: TextStyle(
-                              color: AppColors.muted,
-                              fontSize: 12,
-                            ),
-                          )
-                        : const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                  );
-                }
                 final minX = period.start.millisecondsSinceEpoch.toDouble();
                 final maxX = period.end.millisecondsSinceEpoch.toDouble();
                 final axisInterval = _historyAxisInterval(chartDuration);
@@ -564,128 +618,169 @@ class _HistoryState extends ConsumerState<_History> {
                         periodEnd: period.end,
                       )
                     : null;
-                return Stack(
-                  children: [
-                    LineChart(
-                      LineChartData(
-                        // fl_chart does not clip a curved path by default.  With
-                        // the first/last data point on the chart edge, this could
-                        // paint the path into both neighbouring cards.
-                        clipData: const FlClipData.all(),
-                        minX: minX,
-                        maxX: maxX == minX ? minX + 1 : maxX,
-                        minY: 0,
-                        maxY: 100,
-                        gridData: FlGridData(
-                          show: true,
-                          horizontalInterval: 25,
-                          verticalInterval: axisInterval,
-                          getDrawingHorizontalLine: (_) => const FlLine(
-                            color: AppColors.divider,
-                            strokeWidth: .7,
-                          ),
-                          getDrawingVerticalLine: (_) => const FlLine(
-                            color: AppColors.divider,
-                            strokeWidth: .35,
-                          ),
-                        ),
-                        titlesData: FlTitlesData(
-                          leftTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              reservedSize: 26,
-                              interval: 25,
-                              getTitlesWidget: (v, _) => Text(
-                                '${v.round()}%',
-                                style: const TextStyle(
-                                  fontSize: 9,
-                                  color: AppColors.muted,
+                return LayoutBuilder(
+                  builder: (context, constraints) => MouseRegion(
+                    cursor: _isDragging
+                        ? SystemMouseCursors.grabbing
+                        : SystemMouseCursors.grab,
+                    child: GestureDetector(
+                      key: const ValueKey('history-timeline-pan'),
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragStart: _startTimelineDrag,
+                      onHorizontalDragUpdate: (details) =>
+                          _updateTimelineDrag(details, constraints.maxWidth),
+                      onHorizontalDragEnd: (_) => _endTimelineDrag(),
+                      onHorizontalDragCancel: _endTimelineDrag,
+                      child: Stack(
+                        children: [
+                          LineChart(
+                            LineChartData(
+                              // fl_chart does not clip a curved path by default.  With
+                              // the first/last data point on the chart edge, this could
+                              // paint the path into both neighbouring cards.
+                              clipData: const FlClipData.all(),
+                              minX: minX,
+                              maxX: maxX == minX ? minX + 1 : maxX,
+                              minY: 0,
+                              maxY: 100,
+                              gridData: FlGridData(
+                                show: true,
+                                horizontalInterval: 25,
+                                verticalInterval: axisInterval,
+                                getDrawingHorizontalLine: (_) => const FlLine(
+                                  color: AppColors.divider,
+                                  strokeWidth: .7,
+                                ),
+                                getDrawingVerticalLine: (_) => const FlLine(
+                                  color: AppColors.divider,
+                                  strokeWidth: .35,
+                                ),
+                              ),
+                              titlesData: FlTitlesData(
+                                leftTitles: AxisTitles(
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 26,
+                                    interval: 25,
+                                    getTitlesWidget: (v, _) => Text(
+                                      '${v.round()}%',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                rightTitles: const AxisTitles(),
+                                topTitles: const AxisTitles(),
+                                bottomTitles: AxisTitles(
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 30,
+                                    interval: axisInterval,
+                                    getTitlesWidget: (value, meta) =>
+                                        _historyBottomTitle(
+                                          value,
+                                          meta,
+                                          period: period,
+                                          interval: axisInterval,
+                                          timelineOffset: _timelineOffset,
+                                        ),
+                                  ),
+                                ),
+                              ),
+                              borderData: FlBorderData(show: false),
+                              extraLinesData: ExtraLinesData(
+                                verticalLines: [
+                                  if (_selectedPoint case final selected?)
+                                    VerticalLine(
+                                      x: selected
+                                          .timestamp
+                                          .millisecondsSinceEpoch
+                                          .toDouble(),
+                                      color: selected.isForecast
+                                          ? AppColors.purple
+                                          : AppColors.cyan,
+                                      strokeWidth: 1,
+                                      dashArray: const [3, 3],
+                                    ),
+                                ],
+                              ),
+                              lineBarsData: _historyLineBars(
+                                rows,
+                                period: period,
+                                asOf: widget.asOf,
+                                range: chartDuration,
+                                forecast: forecast,
+                              ),
+                              lineTouchData: LineTouchData(
+                                touchSpotThreshold: 24,
+                                handleBuiltInTouches: false,
+                                touchCallback: _handleHistoryTouch,
+                                touchTooltipData: LineTouchTooltipData(
+                                  fitInsideHorizontally: true,
+                                  fitInsideVertically: true,
+                                  maxContentWidth: 150,
+                                  getTooltipItems: (spots) => spots
+                                      .map(
+                                        (spot) => LineTooltipItem(
+                                          '${spot.bar.color == AppColors.purple ? '预测' : '记录'}时间 '
+                                          '${DateFormat('MM-dd HH:mm:ss').format(DateTime.fromMillisecondsSinceEpoch(spot.x.round()))}\n'
+                                          '剩余 ${spot.y.toStringAsFixed(1)}%',
+                                          TextStyle(
+                                            color:
+                                                spot.bar.color ==
+                                                    AppColors.purple
+                                                ? AppColors.purple
+                                                : AppColors.text,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
                                 ),
                               ),
                             ),
                           ),
-                          rightTitles: const AxisTitles(),
-                          topTitles: const AxisTitles(),
-                          bottomTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              reservedSize: 30,
-                              interval: axisInterval,
-                              getTitlesWidget: (value, meta) =>
-                                  _historyBottomTitle(
-                                    value,
-                                    meta,
-                                    period: period,
-                                    interval: axisInterval,
-                                  ),
-                            ),
-                          ),
-                        ),
-                        borderData: FlBorderData(show: false),
-                        extraLinesData: ExtraLinesData(
-                          verticalLines: [
-                            if (_selectedPoint case final selected?)
-                              VerticalLine(
-                                x: selected.timestamp.millisecondsSinceEpoch
-                                    .toDouble(),
-                                color: selected.isForecast
-                                    ? AppColors.purple
-                                    : AppColors.cyan,
-                                strokeWidth: 1,
-                                dashArray: const [3, 3],
+                          if (rows.isEmpty)
+                            Center(
+                              child: IgnorePointer(
+                                child: _hasLoaded
+                                    ? const Text(
+                                        '此时间段暂无记录 · 可继续左右拖动',
+                                        style: TextStyle(
+                                          color: AppColors.muted,
+                                          fontSize: 12,
+                                        ),
+                                      )
+                                    : const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
                               ),
-                          ],
-                        ),
-                        lineBarsData: _historyLineBars(
-                          rows,
-                          period: period,
-                          asOf: widget.asOf,
-                          range: chartDuration,
-                          forecast: forecast,
-                        ),
-                        lineTouchData: LineTouchData(
-                          touchSpotThreshold: 24,
-                          handleBuiltInTouches: false,
-                          touchCallback: _handleHistoryTouch,
-                          touchTooltipData: LineTouchTooltipData(
-                            fitInsideHorizontally: true,
-                            fitInsideVertically: true,
-                            maxContentWidth: 150,
-                            getTooltipItems: (spots) => spots
-                                .map(
-                                  (spot) => LineTooltipItem(
-                                    '${spot.bar.color == AppColors.purple ? '预测' : '记录'}时间 '
-                                    '${DateFormat('MM-dd HH:mm:ss').format(DateTime.fromMillisecondsSinceEpoch(spot.x.round()))}\n'
-                                    '剩余 ${spot.y.toStringAsFixed(1)}%',
-                                    TextStyle(
-                                      color: spot.bar.color == AppColors.purple
-                                          ? AppColors.purple
-                                          : AppColors.text,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
+                            ),
+                          if (forecast != null)
+                            Positioned(
+                              top: 2,
+                              right: 4,
+                              child: IgnorePointer(
+                                child: _ForecastLegend(forecast: forecast),
+                              ),
+                            ),
+                          if (_selectedPoint case final selected?)
+                            Positioned(
+                              top: 2,
+                              left: 32,
+                              child: _HistoryTouchLabel(point: selected),
+                            ),
+                        ],
                       ),
                     ),
-                    if (forecast != null)
-                      Positioned(
-                        top: 2,
-                        right: 4,
-                        child: IgnorePointer(
-                          child: _ForecastLegend(forecast: forecast),
-                        ),
-                      ),
-                    if (_selectedPoint case final selected?)
-                      Positioned(
-                        top: 2,
-                        left: 32,
-                        child: _HistoryTouchLabel(point: selected),
-                      ),
-                  ],
+                  ),
                 );
               },
             ),
@@ -715,6 +810,7 @@ class _HistoryState extends ConsumerState<_History> {
 
 class _RangeTab extends StatelessWidget {
   const _RangeTab({
+    super.key,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -798,7 +894,7 @@ HistoryPeriod? _historyPeriodFor(_History widget) =>
 
 double _historyAxisInterval(Duration duration) {
   if (duration <= const Duration(hours: 1)) {
-    return const Duration(minutes: 15).inMilliseconds.toDouble();
+    return timelineMinimumStep.inMilliseconds.toDouble();
   }
   if (duration <= const Duration(hours: 6)) {
     return const Duration(hours: 1).inMilliseconds.toDouble();
@@ -812,11 +908,19 @@ double _historyAxisInterval(Duration duration) {
   return const Duration(days: 1).inMilliseconds.toDouble();
 }
 
+String _timelineCacheKey(
+  HistoryPeriod period,
+  Duration rollingRange,
+  Duration timelineOffset,
+) =>
+    '${historyCacheKey(period, rollingRange)}:timeline:${timelineOffset.inHours}';
+
 Widget _historyBottomTitle(
   double value,
   TitleMeta meta, {
   required HistoryPeriod period,
   required double interval,
+  Duration timelineOffset = Duration.zero,
 }) {
   final nearStart = (value - meta.min).abs() < 1;
   final nearEnd = (value - meta.max).abs() < 1;
@@ -830,7 +934,11 @@ Widget _historyBottomTitle(
   final duration = period.end.difference(period.start);
   final label = switch (period.kind) {
     HistoryPeriodKind.today =>
-      nearEnd ? '24:00' : DateFormat('HH:mm').format(time),
+      timelineOffset == Duration.zero
+          ? nearEnd
+                ? '24:00'
+                : DateFormat('HH:mm').format(time)
+          : DateFormat('MM-dd\nHH:mm').format(time),
     HistoryPeriodKind.refreshCycle =>
       duration <= const Duration(hours: 12)
           ? DateFormat('HH:mm').format(time)

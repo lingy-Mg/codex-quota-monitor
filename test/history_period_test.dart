@@ -45,6 +45,44 @@ void main() {
     expect(period.isFixed, isTrue);
   });
 
+  test('a future viewport has no observable interval yet', () {
+    final period = HistoryPeriod(
+      start: DateTime(2026, 8, 24),
+      end: DateTime(2026, 8, 25),
+      kind: HistoryPeriodKind.rolling,
+    );
+
+    expect(period.observedEnd(DateTime(2026, 8, 23)), period.start);
+  });
+
+  test('timeline shifts indefinitely in whole-hour drag steps', () {
+    final period = rollingHistoryPeriod(
+      const Duration(hours: 6),
+      DateTime(2026, 8, 23, 14),
+    );
+
+    expect(
+      timelineHourShiftForDrag(
+        dragDistance: 400,
+        viewportWidth: 800,
+        visibleDuration: const Duration(hours: 6),
+      ),
+      -3,
+    );
+    expect(
+      timelineHourShiftForDrag(
+        dragDistance: -400,
+        viewportWidth: 800,
+        visibleDuration: const Duration(hours: 6),
+      ),
+      3,
+    );
+    final shifted = shiftHistoryPeriod(period, const Duration(hours: -3000));
+    expect(shifted.start, period.start.subtract(const Duration(hours: 3000)));
+    expect(shifted.end, period.end.subtract(const Duration(hours: 3000)));
+    expect(shifted.kind, period.kind);
+  });
+
   test('refresh cycle follows the GPT duration and reset time', () {
     final resetAt = DateTime(2026, 8, 23, 18);
     final period = refreshCycleHistoryPeriod(

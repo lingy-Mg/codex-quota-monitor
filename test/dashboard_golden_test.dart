@@ -239,6 +239,74 @@ void main() {
     );
   });
 
+  testWidgets('history timeline pans forever in one-hour steps', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final now = DateTime(2026, 8, 23, 14);
+    final usage = CodexUsageResponse.fromJson({
+      'rate_limit': {
+        'primary_window': {'used_percent': 38, 'limit_window_seconds': 18000},
+      },
+    });
+    await db.saveUsage(usage, now.subtract(const Duration(minutes: 5)));
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          theme: monitorTheme(),
+          home: DashboardPage(
+            now: () => now,
+            preview: DashboardState(
+              health: MonitorHealth.live,
+              lastSync: now,
+              usage: usage,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('1小时'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final timeline = find.byKey(const ValueKey('history-timeline-pan'));
+    var chart = tester.widget<LineChart>(find.byType(LineChart));
+    final initialMinX = chart.data.minX;
+    expect(
+      chart.data.titlesData.bottomTitles.sideTitles.interval,
+      const Duration(hours: 1).inMilliseconds,
+    );
+
+    final width = tester.getSize(timeline).width;
+    await tester.drag(timeline, Offset(width, 0));
+    await tester.pump(const Duration(milliseconds: 150));
+
+    chart = tester.widget<LineChart>(find.byType(LineChart));
+    expect(
+      chart.data.minX,
+      initialMinX - const Duration(hours: 1).inMilliseconds,
+    );
+    expect(find.text('此时间段暂无记录 · 可继续左右拖动'), findsOneWidget);
+    expect(find.byType(LineChart), findsOneWidget);
+
+    await tester.drag(timeline, Offset(width, 0));
+    await tester.pump(const Duration(milliseconds: 150));
+    chart = tester.widget<LineChart>(find.byType(LineChart));
+    expect(
+      chart.data.minX,
+      initialMinX - const Duration(hours: 2).inMilliseconds,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('history-timeline-now')));
+    await tester.pump(const Duration(milliseconds: 100));
+    chart = tester.widget<LineChart>(find.byType(LineChart));
+    expect(chart.data.minX, initialMinX);
+  });
+
   testWidgets('today and refresh cycle are separate fixed periods', (
     tester,
   ) async {
