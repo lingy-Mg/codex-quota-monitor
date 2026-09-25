@@ -12,8 +12,20 @@ class HistoryConsumptionBucket {
   final double consumedPercent;
 }
 
-/// Every consumption point represents one local clock hour.
-const historyConsumptionUnit = Duration(hours: 1);
+/// Keep short views detailed and long views near 24 visible columns.
+Duration historyConsumptionUnitFor(Duration range) {
+  if (range <= const Duration(hours: 1)) return const Duration(minutes: 5);
+  if (range <= const Duration(hours: 6)) return const Duration(minutes: 15);
+  if (range <= const Duration(hours: 12)) return const Duration(minutes: 30);
+  if (range <= const Duration(days: 1)) return const Duration(hours: 1);
+  return const Duration(hours: 6);
+}
+
+String historyConsumptionUnitLabel(Duration unit) =>
+    unit.inMinutes < 60 ? '${unit.inMinutes}分钟' : '${unit.inHours}小时';
+
+String historyConsumptionValueLabel(Duration unit, double value) =>
+    '每${unit == const Duration(hours: 1) ? '小时' : historyConsumptionUnitLabel(unit)}消耗 ${historyPercentLabel(value)}';
 
 /// Sum observed increases in used quota into fixed time buckets. Resets and
 /// long gaps are excluded because their consumption cannot be located reliably.

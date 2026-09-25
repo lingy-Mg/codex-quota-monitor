@@ -162,6 +162,9 @@ class WebDashboardServer {
     final data = await _dataSource();
     final now = DateTime.now();
     final period = _period(uri, data.usage, now);
+    final consumptionUnit = historyConsumptionUnitFor(
+      period.end.difference(period.start),
+    );
     final observedEnd = period.end.isAfter(now) ? now : period.end;
     final history = observedEnd.isAfter(period.start)
         ? await _database.snapshotsBetween(period.start, observedEnd)
@@ -178,7 +181,7 @@ class WebDashboardServer {
       ],
       start: period.start,
       end: observedEnd,
-      unit: historyConsumptionUnit,
+      unit: consumptionUnit,
     );
     final events = await _database.recentEvents(12);
     return {
@@ -201,7 +204,7 @@ class WebDashboardServer {
             'usedPercent': row.usedPercent,
           },
       ],
-      'consumptionUnitSeconds': historyConsumptionUnit.inSeconds,
+      'consumptionUnitSeconds': consumptionUnit.inSeconds,
       'consumptionHistory': [
         for (final bucket in consumption)
           {

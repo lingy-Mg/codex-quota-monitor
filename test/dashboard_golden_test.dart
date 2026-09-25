@@ -442,25 +442,25 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('history-mode-consumption')));
     await tester.pump();
     final consumptionChart = tester.widget<BarChart>(find.byType(BarChart));
-    expect(consumptionChart.data.maxY, 10);
+    expect(consumptionChart.data.maxY, 5);
     final consumptionBars = consumptionChart.data.barGroups
         .where((group) => group.barRods.first.color == AppColors.green)
         .toList();
-    expect(consumptionBars, hasLength(1));
-    expect(consumptionBars.single.barRods.single.toY, 5);
-    expect(find.textContaining('每小时消耗 5%'), findsWidgets);
+    expect(consumptionBars, hasLength(2));
+    expect(consumptionBars.map((group) => group.barRods.single.toY), [2, 3]);
+    expect(find.textContaining('每15分钟消耗 3%'), findsWidgets);
     expect(find.textContaining('趋势预测'), findsNothing);
     final consumptionTooltip = consumptionChart
         .data
         .barTouchData
         .touchTooltipData
         .getTooltipItem(
-          consumptionBars.single,
-          consumptionBars.single.x,
-          consumptionBars.single.barRods.single,
+          consumptionBars.first,
+          consumptionBars.first.x,
+          consumptionBars.first.barRods.single,
           0,
         );
-    expect(consumptionTooltip?.text, contains('每小时消耗 5%'));
+    expect(consumptionTooltip?.text, contains('每15分钟消耗 2%'));
   });
 
   testWidgets('24 hour consumption bars stay readable at 1280x800', (
@@ -525,5 +525,72 @@ void main() {
       find.byType(DashboardPage),
       matchesGoldenFile('goldens/dashboard_consumption_1280x800.png'),
     );
+  });
+
+  testWidgets('short consumption ranges use 5, 15, and 30 minute bars', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final now = DateTime(2026, 9, 25, 12);
+    final resetAt = now.add(const Duration(hours: 2));
+    CodexUsageResponse usage(double used) => CodexUsageResponse.fromJson({
+      'rate_limit': {
+        'primary_window': {
+          'used_percent': used,
+          'limit_window_seconds': 18000,
+          'reset_at': resetAt.millisecondsSinceEpoch ~/ 1000,
+        },
+      },
+    });
+    for (var i = 0; i <= 144; i++) {
+      await db.saveUsage(
+        usage(10 + i * .2),
+        now.subtract(Duration(minutes: (144 - i) * 5)),
+        retentionDays: 3650,
+      );
+    }
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          theme: monitorTheme(),
+          home: DashboardPage(
+            now: () => now,
+            preview: DashboardState(
+              health: MonitorHealth.live,
+              lastSync: now,
+              usage: usage(38.8),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('history-mode-consumption')));
+    for (final (range, unit, slots, measured, golden) in [
+      ('1小时', '5分钟', 12, 11, 'dashboard_consumption_1h_1280x800.png'),
+      ('6小时', '15分钟', 24, 24, 'dashboard_consumption_6h_1280x800.png'),
+      ('12小时', '30分钟', 24, 24, 'dashboard_consumption_12h_1280x800.png'),
+    ]) {
+      await tester.tap(find.text(range));
+      await tester.pumpAndSettle();
+      final chart = tester.widget<BarChart>(find.byType(BarChart));
+      expect(chart.data.barGroups, hasLength(slots));
+      expect(
+        chart.data.barGroups.where(
+          (group) => group.barRods.first.color == AppColors.green,
+        ),
+        hasLength(measured),
+      );
+      expect(find.text('每根柱为$unit累计消耗'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await expectLater(
+        find.byType(DashboardPage),
+        matchesGoldenFile('goldens/$golden'),
+      );
+    }
   });
 }

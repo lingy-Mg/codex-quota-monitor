@@ -544,6 +544,10 @@ class _HistoryState extends ConsumerState<_History> {
 
   @override
   Widget build(BuildContext c) {
+    final period = _visibleHistoryPeriod;
+    final consumptionUnit = historyConsumptionUnitFor(
+      period?.end.difference(period.start) ?? widget.range,
+    );
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -596,7 +600,7 @@ class _HistoryState extends ConsumerState<_History> {
               ),
               _RangeTab(
                 key: const ValueKey('history-mode-consumption'),
-                label: '每小时消耗',
+                label: '额度消耗',
                 selected: _chartMode == _HistoryChartMode.consumption,
                 onTap: () => setState(() {
                   _chartMode = _HistoryChartMode.consumption;
@@ -606,7 +610,7 @@ class _HistoryState extends ConsumerState<_History> {
               if (_chartMode == _HistoryChartMode.consumption) ...[
                 const SizedBox(width: 8),
                 Text(
-                  '每根柱为该小时累计消耗',
+                  '每根柱为${historyConsumptionUnitLabel(consumptionUnit)}累计消耗',
                   style: const TextStyle(color: AppColors.muted, fontSize: 10),
                 ),
               ],
@@ -616,7 +620,6 @@ class _HistoryState extends ConsumerState<_History> {
           Expanded(
             child: Builder(
               builder: (context) {
-                final period = _visibleHistoryPeriod;
                 if (period == null) {
                   return const Center(
                     child: Text(
@@ -644,7 +647,7 @@ class _HistoryState extends ConsumerState<_History> {
                   ],
                   start: period.start,
                   end: period.observedEnd(widget.asOf),
-                  unit: historyConsumptionUnit,
+                  unit: consumptionUnit,
                 );
                 final isConsumption =
                     _chartMode == _HistoryChartMode.consumption;
@@ -692,6 +695,7 @@ class _HistoryState extends ConsumerState<_History> {
                             _consumptionBarChart(
                               period: period,
                               rows: consumptionRows,
+                              unit: consumptionUnit,
                               axisMax: axisMax,
                               width: constraints.maxWidth,
                               onSelected: (point) =>
@@ -793,10 +797,7 @@ class _HistoryState extends ConsumerState<_History> {
                                     getTooltipItems: (spots) => spots.map((
                                       spot,
                                     ) {
-                                      final point = _historyTouchPoint(
-                                        spot,
-                                        _chartMode,
-                                      );
+                                      final point = _historyTouchPoint(spot);
                                       return LineTooltipItem(
                                         '${point.isForecast ? '预测' : '记录'}时间 '
                                         '${DateFormat('MM-dd HH:mm:ss').format(point.timestamp)}\n'
@@ -848,7 +849,10 @@ class _HistoryState extends ConsumerState<_History> {
                               child: IgnorePointer(
                                 child: _HistoryValueLegend(
                                   label: isConsumption
-                                      ? '每小时消耗 ${historyPercentLabel(consumptionRows.last.consumedPercent)}'
+                                      ? historyConsumptionValueLabel(
+                                          consumptionUnit,
+                                          consumptionRows.last.consumedPercent,
+                                        )
                                       : '剩余 ${historyPercentLabel(remainingRows.last.remainingPercent!)}',
                                   color: isConsumption
                                       ? AppColors.green
@@ -892,7 +896,7 @@ class _HistoryState extends ConsumerState<_History> {
     }
     final spot = spots.first;
     setState(() {
-      _selectedPoint = _historyTouchPoint(spot, _chartMode);
+      _selectedPoint = _historyTouchPoint(spot);
     });
   }
 }
@@ -1110,20 +1114,29 @@ List<LineChartBarData> _historyLineBars(
 Widget _consumptionBarChart({
   required HistoryPeriod period,
   required List<HistoryConsumptionBucket> rows,
+  required Duration unit,
   required double axisMax,
   required double width,
   required ValueChanged<_HistoryTouchPoint?> onSelected,
 }) {
   final start = period.start.toLocal();
   final slots = <DateTime>[];
-  var hour = DateTime(start.year, start.month, start.day, start.hour);
-  while (hour.isBefore(period.end)) {
-    slots.add(hour);
-    hour = hour.add(historyConsumptionUnit);
+  final dayStart = DateTime(start.year, start.month, start.day);
+  final unitMs = unit.inMilliseconds;
+  var slot = dayStart.add(
+    Duration(
+      milliseconds:
+          start.difference(dayStart).inMilliseconds ~/ unitMs * unitMs,
+    ),
+  );
+  while (slot.isBefore(period.end)) {
+    slots.add(slot);
+    slot = slot.add(unit);
   }
   final values = <int, HistoryConsumptionBucket>{};
   for (final row in rows) {
-    final index = row.timestamp.difference(slots.first).inHours;
+    final index =
+        row.timestamp.difference(slots.first).inMilliseconds ~/ unitMs;
     if (index >= 0 && index < slots.length) values[index] = row;
   }
   final barWidth = _consumptionBarWidth(width, slots.length);
@@ -1232,6 +1245,7 @@ Widget _consumptionBarChart({
                     value: row.consumedPercent,
                     isForecast: false,
                     mode: _HistoryChartMode.consumption,
+                    consumptionUnit: unit,
                   ),
           );
         },
@@ -1244,7 +1258,7 @@ Widget _consumptionBarChart({
             if (row == null) return null;
             return BarTooltipItem(
               '记录时间 ${DateFormat('MM-dd HH:mm').format(row.timestamp)}\n'
-              '每小时消耗 ${historyPercentLabel(row.consumedPercent)}',
+              '${historyConsumptionValueLabel(unit, row.consumedPercent)}',
               const TextStyle(
                 color: AppColors.text,
                 fontSize: 11,
@@ -1407,26 +1421,25 @@ class _HistoryTouchPoint {
     required this.value,
     required this.isForecast,
     required this.mode,
+    this.consumptionUnit,
   });
 
   final DateTime timestamp;
   final double value;
   final bool isForecast;
   final _HistoryChartMode mode;
+  final Duration? consumptionUnit;
 
   String get valuesLabel => mode == _HistoryChartMode.consumption
-      ? '每小时消耗 ${historyPercentLabel(value)}'
+      ? historyConsumptionValueLabel(consumptionUnit!, value)
       : '剩余 ${historyPercentLabel(value)}';
 }
 
-_HistoryTouchPoint _historyTouchPoint(
-  LineBarSpot spot,
-  _HistoryChartMode mode,
-) => _HistoryTouchPoint(
+_HistoryTouchPoint _historyTouchPoint(LineBarSpot spot) => _HistoryTouchPoint(
   timestamp: DateTime.fromMillisecondsSinceEpoch(spot.x.round()),
   value: spot.y,
   isForecast: spot.bar.color == AppColors.purple,
-  mode: mode,
+  mode: _HistoryChartMode.remaining,
 );
 
 class _HistoryValueLegend extends StatelessWidget {

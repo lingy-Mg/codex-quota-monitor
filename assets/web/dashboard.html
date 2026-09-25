@@ -75,7 +75,7 @@
     <section class="bottom">
       <div class="panel history">
         <div class="panel-head"><span class="panel-title">额度历史</span><div class="tabs"><label>滚动窗口</label><button class="tab" data-hours="1">1小时</button><button class="tab" data-hours="6">6小时</button><button class="tab" data-hours="12">12小时</button><button class="tab active" data-hours="24">24小时</button><label>独立周期</label><button class="tab" data-period="today">今天</button><button class="tab" data-period="refresh">刷新周期内</button></div></div>
-        <div class="mode-tabs"><button class="mode-tab active" data-mode="remaining">剩余额度</button><button class="mode-tab" data-mode="consumption">每小时消耗</button><span id="modeNote" class="mode-note"></span></div>
+        <div class="mode-tabs"><button class="mode-tab active" data-mode="remaining">剩余额度</button><button class="mode-tab" data-mode="consumption">额度消耗</button><span id="modeNote" class="mode-note"></span></div>
         <div class="chart-wrap"><canvas id="chart" aria-label="额度历史曲线"></canvas><div id="chartEmpty" class="chart-empty">正在读取历史数据</div><div id="chartTooltip" class="chart-tooltip" hidden></div></div>
       </div>
       <div class="panel events">
@@ -94,12 +94,13 @@
       const localDate=v=>{if(!v)return'--';const d=new Date(v);return `${two(d.getMonth()+1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`};
       const clock=ms=>{if(ms<=0)return'等待刷新';const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s/3600)%24;return `${d>0?`${d}天 `:''}${two(h)}:${two(Math.floor(s/60)%60)}:${two(s%60)}`};
       const duration=s=>{if(s==null)return'--';if(s%86400===0)return`${s/86400}天`;if(s%3600===0)return`${s/3600}小时`;if(s%60===0)return`${s/60}分钟`;return`${s}秒`};
+      const consumptionMeasure=s=>s===3600?'小时':duration(s);
       function updateClock(){const w=current?.usage?.windows?.[0];if(!w?.resetAt){$('countdown').textContent='--';return}const left=new Date(w.resetAt)-Date.now();$('countdown').textContent=clock(left);if(w.durationSeconds){$('timeFill').style.width=`${Math.max(0,Math.min(100,left/1000/w.durationSeconds*100))}%`}}
       function render(data){current=data;const h=(data.health||'loading').toUpperCase();$('health').textContent=h;$('health').style.color=h==='LIVE'?'var(--green)':h==='AUTH'?'var(--danger)':h==='OFFLINE'?'var(--warning)':'var(--cyan)';$('health').style.borderColor='currentColor';$('network').textContent=h==='LIVE'?'网络 在线':`网络 ${h}`;$('wifi').textContent=`Wi-Fi ${data.device?.wifiIp||location.hostname}`;$('refresh').textContent=`自动刷新 ${data.refreshSeconds||'--'}s`;$('power').textContent=data.device?.charging?'已供电':'电池供电';$('memory').textContent=data.device?.memoryMb==null?'内存 --':`内存 ${Number(data.device.memoryMb).toFixed(1)} MB`;$('sync').textContent=`最后同步 ${data.lastSync?new Date(data.lastSync).toLocaleTimeString('zh-CN',{hour12:false}):'--'}`;
         const u=data.usage,w=u?.windows?.[0];$('remaining').textContent=`${pct(w?.remainingPercent)}%`;$('quotaFill').style.width=`${w?.remainingPercent||0}%`;$('window').textContent=`${duration(w?.durationSeconds)}周期`;$('reset').textContent=w?`已使用 ${pct(w.usedPercent)}% · ${w.resetAt?localDate(w.resetAt)+' 重置':'重置时间未知'}`:'等待同步';updateClock();
         const additions=u?.additional||[];$('additional').innerHTML=additions.length?additions.map(a=>{const aw=a.windows?.[0],detail=(a.windows||[]).map(x=>`${duration(x.durationSeconds)}周期 · 剩余 ${pct(x.remainingPercent)}% · ${x.resetAt?localDate(x.resetAt):'重置时间未知'}`).join(' / ');return `<div class="additional"><div class="additional-head"><span class="additional-name">${esc(a.name?.toLowerCase()==='gpt-reserve'?'GPT Reserve':'附加额度 · '+(a.name||'--'))}</span><span class="additional-value">${pct(aw?.remainingPercent)}%</span></div><div class="mini-track"><div class="fill" style="width:${Number(aw?.remainingPercent||0)}%"></div></div><div class="additional-detail">${esc(detail||'暂无额度数据')}</div></div>`}).join(''):'<div class="empty">暂无附加额度</div>';
         $('balance').textContent=u?.credits?.unlimited?'Unlimited':u?.credits?.balance||'--';$('resetCount').textContent=`重置卡 ${u?.resetCredits??'--'} 张`;const cards=u?.resetCards;$('tickets').innerHTML=cards==null?'<div class="empty">到期明细暂不可用</div>':cards.length?cards.slice().sort((a,b)=>new Date(a.expiresAt)-new Date(b.expiresAt)).map((c,i)=>{const left=c.expiresAt?new Date(c.expiresAt)-Date.now():null,days=left==null?null:Math.max(0,Math.floor(left/86400000)),urgent=left!=null&&left<=3*86400000;return `<div class="ticket ${urgent?'urgent':''}"><div class="ticket-id">卡 ${two(i+1)}</div><div><div class="caption">剩余</div><div class="ticket-days">${days==null?'--':two(Math.min(99,days))}</div><div class="ticket-unit">天</div></div><div class="ticket-date">${c.expiresAt?new Date(c.expiresAt).toLocaleDateString('zh-CN'):'日期未知'}</div></div>`}).join(''):'<div class="empty">暂无可用重置卡</div>';
-        const events=data.events||[];$('events').innerHTML=events.length?events.map(e=>`<div class="event" data-type="${esc(e.type)}"><span class="dot"></span><div><div class="event-title">${esc(e.title)}</div><div class="event-desc">${esc(e.description)}</div></div><span class="event-time">${new Date(e.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</span></div>`).join(''):'<div class="empty">暂无活动记录</div>';$('modeNote').textContent=chartMode==='consumption'?'每根柱为该小时累计消耗':'';drawChart(data);schedule(data.refreshSeconds);}
+        const events=data.events||[];$('events').innerHTML=events.length?events.map(e=>`<div class="event" data-type="${esc(e.type)}"><span class="dot"></span><div><div class="event-title">${esc(e.title)}</div><div class="event-desc">${esc(e.description)}</div></div><span class="event-time">${new Date(e.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</span></div>`).join(''):'<div class="empty">暂无活动记录</div>';$('modeNote').textContent=chartMode==='consumption'?`每根柱为${duration(data.consumptionUnitSeconds||3600)}累计消耗`:'';drawChart(data);schedule(data.refreshSeconds);}
       function drawChart(data){
         const canvas=$('chart'),dpr=devicePixelRatio||1,w=Math.max(1,canvas.clientWidth),h=Math.max(1,canvas.clientHeight);
         canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
@@ -118,11 +119,11 @@
         c.fillStyle='#7f91a8';c.textAlign='center';
         for(let i=0;i<=4;i++){const x=pad.l+plotWidth*i/4,d=new Date(start+(end-start)*i/4);c.fillText(`${two(d.getHours())}:${two(d.getMinutes())}`,x,h-7)}
         if(consumption){
-          const hourMs=(data.consumptionUnitSeconds||3600)*1000,slotCount=Math.max(1,Math.ceil((end-start)/hourMs)+1);
+          const unitMs=(data.consumptionUnitSeconds||3600)*1000,slotCount=Math.max(1,Math.ceil((end-start)/unitMs)+1);
           const naturalWidth=plotWidth/slotCount*.62,barWidth=Math.min(14,Math.max(slotCount<=25?7:2,naturalWidth));
           c.fillStyle='#48e5a4';
           rows.forEach(r=>{
-            const x=Math.max(pad.l+barWidth/2,Math.min(w-pad.r-barWidth/2,xFor(r)+hourMs/2/(end-start)*plotWidth));
+            const x=Math.max(pad.l+barWidth/2,Math.min(w-pad.r-barWidth/2,xFor(r)+unitMs/2/(end-start)*plotWidth));
             const barHeight=Math.max(2,Math.min(plotHeight,Math.max(0,Number(r.consumedPercent)||0)/axisMax*plotHeight));
             c.fillRect(x-barWidth/2,pad.t+plotHeight-barHeight,barWidth,barHeight);
             chartPoints.push({row:r,x,hitWidth:Math.max(10,barWidth/2+5)});
@@ -133,14 +134,14 @@
           c.stroke();chartPoints=rows.map(r=>({row:r,x:xFor(r),hitWidth:20}));
         }
         const latest=rows[rows.length-1];c.font='11px Segoe UI';c.textAlign='left';
-        c.fillStyle=consumption?'#48e5a4':'#42d9ff';c.fillRect(pad.l,9,12,3);c.fillText(consumption?(narrow?`每小时消耗 ${percent(value(latest))}`:`每小时消耗 ${percent(value(latest))} · 刻度上限 ${percent(axisMax)}`):`剩余 ${percent(value(latest))}`,pad.l+18,14);
+        c.fillStyle=consumption?'#48e5a4':'#42d9ff';c.fillRect(pad.l,9,12,3);const measure=consumptionMeasure(data.consumptionUnitSeconds||3600);c.fillText(consumption?(narrow?`每${measure}消耗 ${percent(value(latest))}`:`每${measure}消耗 ${percent(value(latest))} · 刻度上限 ${percent(axisMax)}`):`剩余 ${percent(value(latest))}`,pad.l+18,14);
       }
       $('chart').addEventListener('pointermove',e=>{
         const canvas=$('chart'),tip=$('chartTooltip'),rect=canvas.getBoundingClientRect();
         const x=(e.clientX-rect.left)*canvas.clientWidth/rect.width,y=(e.clientY-rect.top)*canvas.clientHeight/rect.height;
         const nearest=chartPoints.reduce((best,p)=>!best||Math.abs(p.x-x)<Math.abs(best.x-x)?p:best,null);
         if(!nearest||Math.abs(nearest.x-x)>nearest.hitWidth){tip.hidden=true;return}
-        const row=nearest.row;tip.textContent=chartMode==='consumption'?`${localDate(row.timestamp)} · 每小时消耗 ${percent(row.consumedPercent)}`:`${localDate(row.timestamp)} · 剩余 ${percent(row.remainingPercent)}`;
+        const row=nearest.row;tip.textContent=chartMode==='consumption'?`${localDate(row.timestamp)} · 每${consumptionMeasure(current?.consumptionUnitSeconds||3600)}消耗 ${percent(row.consumedPercent)}`:`${localDate(row.timestamp)} · 剩余 ${percent(row.remainingPercent)}`;
         tip.hidden=false;tip.style.left=`${Math.min(canvas.clientWidth-tip.offsetWidth-4,Math.max(4,x+12))}px`;
         tip.style.top=`${Math.max(4,y-tip.offsetHeight-10)}px`;
       });
@@ -149,7 +150,7 @@
       async function load(){try{const q=new URLSearchParams(period==='rolling'?{period,hours}:{period});const r=await fetch(`/api/dashboard?${q}`,{cache:'no-store'});if(!r.ok)throw Error();render(await r.json());$('error').classList.remove('show')}catch(_){$('error').classList.add('show');schedule(30)}}
       function fitDashboard(){const stacked=matchMedia('(orientation:portrait), (max-width:900px)').matches,scale=stacked?1:Math.min(1,innerWidth/designWidth,innerHeight/designHeight);shell.style.setProperty('--dashboard-scale',String(Math.max(.1,scale)));if(current)requestAnimationFrame(()=>drawChart(current))}
       document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');period=b.dataset.period||'rolling';hours=Number(b.dataset.hours||24);load()}));
-      document.querySelectorAll('.mode-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');chartMode=b.dataset.mode;$('modeNote').textContent=chartMode==='consumption'?'每根柱为该小时累计消耗':'';$('chart').setAttribute('aria-label',chartMode==='consumption'?'每小时消耗柱状图':'额度剩余历史曲线');if(current)drawChart(current)}));
+      document.querySelectorAll('.mode-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');chartMode=b.dataset.mode;$('modeNote').textContent=chartMode==='consumption'?`每根柱为${duration(current?.consumptionUnitSeconds||3600)}累计消耗`:'';$('chart').setAttribute('aria-label',chartMode==='consumption'?'额度消耗柱状图':'额度剩余历史曲线');if(current)drawChart(current)}));
       addEventListener('resize',fitDashboard);fitDashboard();setInterval(updateClock,1000);load();
     })();
   </script>

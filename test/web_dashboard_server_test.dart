@@ -127,8 +127,8 @@ void main() {
     expect(json['history'][0]['remainingPercent'], 68);
     expect(json['history'][0]['usedPercent'], 32);
     expect(json['consumptionUnitSeconds'], 3600);
-    expect(jsonDecode(result.hourlyBody)['consumptionUnitSeconds'], 3600);
-    expect(jsonDecode(result.cycleBody)['consumptionUnitSeconds'], 3600);
+    expect(jsonDecode(result.hourlyBody)['consumptionUnitSeconds'], 300);
+    expect(jsonDecode(result.cycleBody)['consumptionUnitSeconds'], 900);
     expect(json['consumptionHistory'], hasLength(1));
     expect(json['consumptionHistory'][0]['consumedPercent'], 2);
     expect(json['events'], isNotEmpty);
@@ -148,7 +148,7 @@ void main() {
     expect(result.page, contains('overflow:hidden'));
     expect(result.page, contains('Math.min(1,innerWidth/designWidth'));
     expect(result.page, contains('data-mode="consumption"'));
-    expect(result.page, contains('每小时消耗'));
+    expect(result.page, contains('额度消耗'));
     expect(result.page, contains('consumptionAxisMax(rows)'));
     expect(result.page, contains('data.consumptionHistory'));
   });
