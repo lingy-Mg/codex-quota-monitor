@@ -51,6 +51,20 @@ void main() {
       },
     );
     await database.saveUsage(usage, now.subtract(const Duration(minutes: 5)));
+    await database.saveUsage(
+      CodexUsageResponse.fromJson({
+        'rate_limit': {
+          'primary_window': {
+            'used_percent': 34,
+            'limit_window_seconds': 18000,
+            'reset_at':
+                now.add(const Duration(hours: 2)).millisecondsSinceEpoch ~/
+                1000,
+          },
+        },
+      }),
+      now.subtract(const Duration(minutes: 3)),
+    );
     final server = WebDashboardServer(
       database,
       () => WebDashboardData(
@@ -78,6 +92,18 @@ void main() {
         ),
       )).close();
       final body = await utf8.decodeStream(response);
+      final hourlyResponse = await (await client.getUrl(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/api/dashboard?period=rolling&hours=1',
+        ),
+      )).close();
+      final hourlyBody = await utf8.decodeStream(hourlyResponse);
+      final cycleResponse = await (await client.getUrl(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/api/dashboard?period=refresh',
+        ),
+      )).close();
+      final cycleBody = await utf8.decodeStream(cycleResponse);
       final pageResponse = await (await client.getUrl(
         Uri.parse('http://127.0.0.1:${server.port}/'),
       )).close();
@@ -86,6 +112,8 @@ void main() {
       return (
         status: response.statusCode,
         body: body,
+        hourlyBody: hourlyBody,
+        cycleBody: cycleBody,
         pageStatus: pageResponse.statusCode,
         page: page,
       );
@@ -96,6 +124,13 @@ void main() {
     expect(result.status, HttpStatus.ok);
     expect(json['health'], 'live');
     expect(json['history'], isNotEmpty);
+    expect(json['history'][0]['remainingPercent'], 68);
+    expect(json['history'][0]['usedPercent'], 32);
+    expect(json['consumptionUnitSeconds'], 3600);
+    expect(jsonDecode(result.hourlyBody)['consumptionUnitSeconds'], 3600);
+    expect(jsonDecode(result.cycleBody)['consumptionUnitSeconds'], 3600);
+    expect(json['consumptionHistory'], hasLength(1));
+    expect(json['consumptionHistory'][0]['consumedPercent'], 2);
     expect(json['events'], isNotEmpty);
     expect(json['device']['wifiIp'], '192.168.1.23');
     expect(json['usage']['windows'][0]['remainingPercent'], 68);
@@ -112,6 +147,10 @@ void main() {
     expect(result.page, contains('width:1280px;height:800px'));
     expect(result.page, contains('overflow:hidden'));
     expect(result.page, contains('Math.min(1,innerWidth/designWidth'));
+    expect(result.page, contains('data-mode="consumption"'));
+    expect(result.page, contains('每小时消耗'));
+    expect(result.page, contains('consumptionAxisMax(rows)'));
+    expect(result.page, contains('data.consumptionHistory'));
   });
 }
 

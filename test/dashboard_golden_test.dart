@@ -420,6 +420,7 @@ void main() {
         .getTooltipItems([LineBarSpot(historyBar, 0, historyBar.spots.first)]);
     expect(tooltipItems.single?.text, contains('记录时间'));
     expect(tooltipItems.single?.text, contains('剩余'));
+    expect(tooltipItems.single?.text, isNot(contains('消耗')));
 
     final touchCallback = chart.data.lineTouchData.touchCallback;
     expect(touchCallback, isNotNull);
@@ -437,5 +438,92 @@ void main() {
     );
     await tester.pump();
     expect(find.textContaining('记录 08-24'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('history-mode-consumption')));
+    await tester.pump();
+    final consumptionChart = tester.widget<BarChart>(find.byType(BarChart));
+    expect(consumptionChart.data.maxY, 10);
+    final consumptionBars = consumptionChart.data.barGroups
+        .where((group) => group.barRods.first.color == AppColors.green)
+        .toList();
+    expect(consumptionBars, hasLength(1));
+    expect(consumptionBars.single.barRods.single.toY, 5);
+    expect(find.textContaining('每小时消耗 5%'), findsWidgets);
+    expect(find.textContaining('趋势预测'), findsNothing);
+    final consumptionTooltip = consumptionChart
+        .data
+        .barTouchData
+        .touchTooltipData
+        .getTooltipItem(
+          consumptionBars.single,
+          consumptionBars.single.x,
+          consumptionBars.single.barRods.single,
+          0,
+        );
+    expect(consumptionTooltip?.text, contains('每小时消耗 5%'));
+  });
+
+  testWidgets('24 hour consumption bars stay readable at 1280x800', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final now = DateTime(2026, 9, 25, 12);
+    final resetAt = now.add(const Duration(hours: 2));
+    CodexUsageResponse usage(double used) => CodexUsageResponse.fromJson({
+      'rate_limit': {
+        'primary_window': {
+          'used_percent': used,
+          'limit_window_seconds': 18000,
+          'reset_at': resetAt.millisecondsSinceEpoch ~/ 1000,
+        },
+      },
+    });
+    for (var i = 0; i < 24; i++) {
+      final hour = now.subtract(Duration(hours: 24 - i));
+      await db.saveUsage(usage(10 + i * 2), hour, retentionDays: 3650);
+      await db.saveUsage(
+        usage(10 + i * 2 + .2 + (i % 5) * .22),
+        hour.add(const Duration(minutes: 5)),
+        retentionDays: 3650,
+      );
+    }
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          theme: monitorTheme(),
+          home: DashboardPage(
+            now: () => now,
+            preview: DashboardState(
+              health: MonitorHealth.live,
+              lastSync: now,
+              usage: usage(17.1),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('24小时'));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('history-mode-consumption')));
+    await tester.pumpAndSettle();
+    final chart = tester.widget<BarChart>(find.byType(BarChart));
+    final measuredBars = chart.data.barGroups
+        .where((group) => group.barRods.first.color == AppColors.green)
+        .toList();
+    expect(measuredBars, hasLength(24));
+    expect(
+      measuredBars.map((group) => group.barRods.first.width),
+      everyElement(inInclusiveRange(7, 14)),
+    );
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(DashboardPage),
+      matchesGoldenFile('goldens/dashboard_consumption_1280x800.png'),
+    );
   });
 }

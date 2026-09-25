@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../core/history_consumption.dart';
 import '../core/models.dart';
 import '../database/app_database.dart';
 import 'device_service.dart';
@@ -165,6 +166,20 @@ class WebDashboardServer {
     final history = observedEnd.isAfter(period.start)
         ? await _database.snapshotsBetween(period.start, observedEnd)
         : const <QuotaSnapshot>[];
+    final consumption = historyConsumptionBuckets(
+      [
+        for (final row in history)
+          (
+            timestamp: row.timestamp,
+            usedPercent: row.usedPercent,
+            resetAt: row.resetAt,
+            windowDurationSeconds: row.windowDurationSeconds,
+          ),
+      ],
+      start: period.start,
+      end: observedEnd,
+      unit: historyConsumptionUnit,
+    );
     final events = await _database.recentEvents(12);
     return {
       'generatedAt': now.toUtc().toIso8601String(),
@@ -183,6 +198,15 @@ class WebDashboardServer {
           {
             'timestamp': row.timestamp.toUtc().toIso8601String(),
             'remainingPercent': row.remainingPercent,
+            'usedPercent': row.usedPercent,
+          },
+      ],
+      'consumptionUnitSeconds': historyConsumptionUnit.inSeconds,
+      'consumptionHistory': [
+        for (final bucket in consumption)
+          {
+            'timestamp': bucket.timestamp.toUtc().toIso8601String(),
+            'consumedPercent': bucket.consumedPercent,
           },
       ],
       'events': [

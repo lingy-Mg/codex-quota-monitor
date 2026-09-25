@@ -249,8 +249,9 @@ String windowLabel(int? seconds) {
 
 String durationClock(Duration d) {
   if (d.isNegative) return '等待刷新';
-  final hours = d.inHours;
-  return '${hours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+  final days = d.inDays > 0 ? '${d.inDays}天 ' : '';
+  final hours = d.inHours % 24;
+  return '$days${hours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
 }
 
 String uptimeLabel(Duration d) =>

@@ -16,10 +16,39 @@
     .tracks{margin:14px 0 10px}.track{height:8px;background:var(--track);overflow:hidden}.track:first-child{height:16px;border-radius:8px 8px 2px 2px}.track:last-child{margin-top:2px;border-radius:2px 2px 8px 8px}.fill{height:100%;width:0;background:linear-gradient(90deg,#42d9ff88,var(--cyan));transition:width .35s}.time-fill{background:linear-gradient(90deg,#48e5a488,var(--green))}
     .quota-foot{display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:11px}.quota-foot span:last-child{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.subhead{font-weight:750;font-size:13px}.additional-list{height:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 22px;align-content:start;overflow:auto;padding-right:3px}.additional{min-width:0}.additional-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:8px}.additional-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}.additional-value{font:700 14px ui-monospace,monospace;color:var(--cyan)}.mini-track{height:5px;border-radius:5px;background:var(--track);overflow:hidden;margin-bottom:7px}.additional-detail{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .credits{display:grid;grid-template-rows:28px 1fr;gap:12px}.credits-head{display:flex;align-items:center;gap:8px}.balance{font-weight:750;font-size:17px;overflow:hidden;text-overflow:ellipsis}.reset-count{margin-left:auto;color:var(--purple);font-size:14px;font-weight:750}.tickets{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(96px,1fr);gap:8px;overflow-x:auto}.ticket{border:1px solid #ae83ff4d;border-radius:12px;background:#ae83ff10;padding:10px 7px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-width:96px}.ticket.urgent{border-color:#ffb74d55;background:#ffb74d10}.ticket-id{font-size:10px;color:#ae83ffaa}.ticket-days{font:800 46px/1 ui-monospace,monospace;color:var(--purple)}.ticket.urgent .ticket-days{color:var(--warning)}.ticket-unit,.ticket-date{font-size:10px;color:var(--muted)}.empty{height:100%;display:grid;place-items:center;color:var(--muted);font-size:13px}
-    .history{display:grid;grid-template-rows:30px 1fr;gap:8px}.panel-head{display:flex;align-items:center;min-width:0}.panel-title{font-size:16px;font-weight:750;white-space:nowrap}.tabs{margin-left:auto;display:flex;align-items:center;gap:4px}.tabs label{font-size:10px;color:var(--muted);margin:0 4px 0 8px}.tab{border:0;background:transparent;color:var(--muted);font-size:11px;padding:5px 8px;border-radius:7px;cursor:pointer}.tab:hover{background:var(--card2);color:var(--text)}.tab.active{background:#42d9ff18;color:var(--cyan)}.chart-wrap{position:relative;min-height:0}.chart-wrap canvas{position:absolute;inset:0;width:100%;height:100%}.chart-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px;pointer-events:none}.chart-empty[hidden]{display:none}
+    .history{display:grid;grid-template-rows:30px 26px 1fr;gap:5px}.panel-head{display:flex;align-items:center;min-width:0}.panel-title{font-size:16px;font-weight:750;white-space:nowrap}.tabs{margin-left:auto;display:flex;align-items:center;gap:4px}.tabs label{font-size:10px;color:var(--muted);margin:0 4px 0 8px}.tab,.mode-tab{border:0;background:transparent;color:var(--muted);font-size:11px;padding:5px 8px;border-radius:7px;cursor:pointer}.tab:hover,.mode-tab:hover{background:var(--card2);color:var(--text)}.tab.active{background:#42d9ff18;color:var(--cyan)}.mode-tabs{display:flex;align-items:center;gap:3px}.mode-tab.active{background:#42d9ff18;color:var(--cyan)}.mode-tab[data-mode="consumption"].active{background:#48e5a418;color:var(--green)}.mode-note{margin-left:8px;font-size:10px;color:var(--muted)}.chart-wrap{position:relative;min-height:0}.chart-wrap canvas{position:absolute;inset:0;width:100%;height:100%}.chart-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px;pointer-events:none}.chart-empty[hidden]{display:none}
+    .chart-tooltip{position:absolute;z-index:2;pointer-events:none;white-space:nowrap;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:#0b1927ed;color:var(--text);font:11px ui-monospace,monospace}.chart-tooltip[hidden]{display:none}
     .events{display:grid;grid-template-rows:30px 1fr;gap:8px}.event-list{overflow:auto}.event{display:grid;grid-template-columns:8px 1fr auto;gap:9px;padding:9px 0;border-bottom:1px solid #22304499;align-items:start}.event:last-child{border:0}.dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);margin-top:6px}.event[data-type="reset"] .dot{background:var(--purple)}.event[data-type="auth_error"] .dot{background:var(--danger)}.event-title{font-size:12px;font-weight:650}.event-desc{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event-time{font:10px ui-monospace,monospace;color:var(--muted)}
     .additional-list,.tickets,.event-list{scrollbar-width:none}.additional-list::-webkit-scrollbar,.tickets::-webkit-scrollbar,.event-list::-webkit-scrollbar{display:none}
     .error-banner{display:none;position:fixed;right:18px;bottom:18px;padding:10px 14px;border:1px solid #ff647c66;border-radius:10px;background:#25131a;color:#ff9aaa;font-size:12px;z-index:5}.error-banner.show{display:block}
+    @media (orientation:portrait), (max-width:900px){
+      html,body{height:auto;min-height:100%;overflow-x:hidden;overflow-y:auto}
+      body{display:block}
+      .shell{width:min(100%,900px);height:auto;min-height:100vh;margin:0 auto;padding:14px;grid-template-rows:none;gap:12px;transform:none}
+      header{flex-wrap:wrap;gap:8px}
+      .brand{font-size:21px}.pill{margin-left:0}
+      .meta{width:100%;margin-left:0;gap:5px 12px;flex-wrap:wrap;white-space:normal;overflow:visible}
+      .meta span{overflow:visible;text-overflow:clip}
+      .top,.bottom{grid-template-columns:minmax(0,1fr);gap:12px}
+      .panel{padding:14px;overflow:visible}
+      .quota-panel{grid-template-rows:auto 1px auto;gap:14px}
+      .quota-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;gap:8px}
+      .quota-number{font-size:40px}.countdown-label{grid-column:1;margin-left:0}.countdown{grid-column:2/4;font-size:27px}
+      .quota-foot{flex-wrap:wrap;gap:4px 12px}.quota-foot span:last-child{text-align:left;white-space:normal}
+      .additional-list{height:auto;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}
+      .credits{grid-template-rows:auto auto}.credits-head{flex-wrap:wrap}
+      .tickets{min-height:150px;grid-auto-columns:minmax(96px,130px)}
+      .history{grid-template-rows:auto auto minmax(260px,auto)}
+      .history .panel-head{display:block}.tabs{margin:8px 0 0;flex-wrap:wrap;justify-content:flex-start}
+      .mode-tabs{min-height:34px;flex-wrap:wrap}
+      .tabs label:first-child{margin-left:0}.tab{min-height:34px}
+      .events{grid-template-rows:auto auto}.event-list{max-height:320px;overflow:auto}
+      .error-banner{left:14px;right:14px;bottom:14px}
+    }
+    @media (max-width:480px){
+      .additional-list{grid-template-columns:minmax(0,1fr)}
+      .tickets{grid-auto-columns:minmax(96px,1fr)}
+    }
   </style>
 </head>
 <body>
@@ -45,8 +74,9 @@
     </section>
     <section class="bottom">
       <div class="panel history">
-        <div class="panel-head"><span class="panel-title">额度剩余历史</span><div class="tabs"><label>滚动窗口</label><button class="tab" data-hours="1">1小时</button><button class="tab" data-hours="6">6小时</button><button class="tab" data-hours="12">12小时</button><button class="tab active" data-hours="24">24小时</button><label>独立周期</label><button class="tab" data-period="today">今天</button><button class="tab" data-period="refresh">刷新周期内</button></div></div>
-        <div class="chart-wrap"><canvas id="chart"></canvas><div id="chartEmpty" class="chart-empty">正在读取历史数据</div></div>
+        <div class="panel-head"><span class="panel-title">额度历史</span><div class="tabs"><label>滚动窗口</label><button class="tab" data-hours="1">1小时</button><button class="tab" data-hours="6">6小时</button><button class="tab" data-hours="12">12小时</button><button class="tab active" data-hours="24">24小时</button><label>独立周期</label><button class="tab" data-period="today">今天</button><button class="tab" data-period="refresh">刷新周期内</button></div></div>
+        <div class="mode-tabs"><button class="mode-tab active" data-mode="remaining">剩余额度</button><button class="mode-tab" data-mode="consumption">每小时消耗</button><span id="modeNote" class="mode-note"></span></div>
+        <div class="chart-wrap"><canvas id="chart" aria-label="额度历史曲线"></canvas><div id="chartEmpty" class="chart-empty">正在读取历史数据</div><div id="chartTooltip" class="chart-tooltip" hidden></div></div>
       </div>
       <div class="panel events">
         <div class="panel-head"><span class="panel-title">活动记录</span></div><div id="events" class="event-list"><div class="empty">暂无活动记录</div></div>
@@ -57,22 +87,70 @@
   <script>
     (()=>{
       const $=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      const designWidth=1280,designHeight=800,shell=document.querySelector('.shell');let current=null, period='rolling', hours=24, timer=null;
+      const designWidth=1280,designHeight=800,shell=document.querySelector('.shell');let current=null, period='rolling', hours=24, chartMode='remaining', timer=null,chartPoints=[];
       const pct=v=>v==null?'--':Math.round(v), two=v=>String(v).padStart(2,'0');
+      const percent=v=>v==null?'--':`${Number(Number(v).toFixed(Math.abs(Number(v))<1?2:1))}%`;
+      const consumptionAxisMax=rows=>{const highest=rows.reduce((max,r)=>Math.max(max,Number(r.consumedPercent)||0),0);return [0.5,1,2,5,10,20,25,40,50,80,100].find(v=>highest*1.1<=v)||100};
       const localDate=v=>{if(!v)return'--';const d=new Date(v);return `${two(d.getMonth()+1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`};
-      const clock=ms=>{if(ms<=0)return'等待刷新';const s=Math.floor(ms/1000),h=Math.floor(s/3600);return `${two(h)}:${two(Math.floor(s/60)%60)}:${two(s%60)}`};
+      const clock=ms=>{if(ms<=0)return'等待刷新';const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s/3600)%24;return `${d>0?`${d}天 `:''}${two(h)}:${two(Math.floor(s/60)%60)}:${two(s%60)}`};
       const duration=s=>{if(s==null)return'--';if(s%86400===0)return`${s/86400}天`;if(s%3600===0)return`${s/3600}小时`;if(s%60===0)return`${s/60}分钟`;return`${s}秒`};
       function updateClock(){const w=current?.usage?.windows?.[0];if(!w?.resetAt){$('countdown').textContent='--';return}const left=new Date(w.resetAt)-Date.now();$('countdown').textContent=clock(left);if(w.durationSeconds){$('timeFill').style.width=`${Math.max(0,Math.min(100,left/1000/w.durationSeconds*100))}%`}}
       function render(data){current=data;const h=(data.health||'loading').toUpperCase();$('health').textContent=h;$('health').style.color=h==='LIVE'?'var(--green)':h==='AUTH'?'var(--danger)':h==='OFFLINE'?'var(--warning)':'var(--cyan)';$('health').style.borderColor='currentColor';$('network').textContent=h==='LIVE'?'网络 在线':`网络 ${h}`;$('wifi').textContent=`Wi-Fi ${data.device?.wifiIp||location.hostname}`;$('refresh').textContent=`自动刷新 ${data.refreshSeconds||'--'}s`;$('power').textContent=data.device?.charging?'已供电':'电池供电';$('memory').textContent=data.device?.memoryMb==null?'内存 --':`内存 ${Number(data.device.memoryMb).toFixed(1)} MB`;$('sync').textContent=`最后同步 ${data.lastSync?new Date(data.lastSync).toLocaleTimeString('zh-CN',{hour12:false}):'--'}`;
         const u=data.usage,w=u?.windows?.[0];$('remaining').textContent=`${pct(w?.remainingPercent)}%`;$('quotaFill').style.width=`${w?.remainingPercent||0}%`;$('window').textContent=`${duration(w?.durationSeconds)}周期`;$('reset').textContent=w?`已使用 ${pct(w.usedPercent)}% · ${w.resetAt?localDate(w.resetAt)+' 重置':'重置时间未知'}`:'等待同步';updateClock();
         const additions=u?.additional||[];$('additional').innerHTML=additions.length?additions.map(a=>{const aw=a.windows?.[0],detail=(a.windows||[]).map(x=>`${duration(x.durationSeconds)}周期 · 剩余 ${pct(x.remainingPercent)}% · ${x.resetAt?localDate(x.resetAt):'重置时间未知'}`).join(' / ');return `<div class="additional"><div class="additional-head"><span class="additional-name">${esc(a.name?.toLowerCase()==='gpt-reserve'?'GPT Reserve':'附加额度 · '+(a.name||'--'))}</span><span class="additional-value">${pct(aw?.remainingPercent)}%</span></div><div class="mini-track"><div class="fill" style="width:${Number(aw?.remainingPercent||0)}%"></div></div><div class="additional-detail">${esc(detail||'暂无额度数据')}</div></div>`}).join(''):'<div class="empty">暂无附加额度</div>';
         $('balance').textContent=u?.credits?.unlimited?'Unlimited':u?.credits?.balance||'--';$('resetCount').textContent=`重置卡 ${u?.resetCredits??'--'} 张`;const cards=u?.resetCards;$('tickets').innerHTML=cards==null?'<div class="empty">到期明细暂不可用</div>':cards.length?cards.slice().sort((a,b)=>new Date(a.expiresAt)-new Date(b.expiresAt)).map((c,i)=>{const left=c.expiresAt?new Date(c.expiresAt)-Date.now():null,days=left==null?null:Math.max(0,Math.floor(left/86400000)),urgent=left!=null&&left<=3*86400000;return `<div class="ticket ${urgent?'urgent':''}"><div class="ticket-id">卡 ${two(i+1)}</div><div><div class="caption">剩余</div><div class="ticket-days">${days==null?'--':two(Math.min(99,days))}</div><div class="ticket-unit">天</div></div><div class="ticket-date">${c.expiresAt?new Date(c.expiresAt).toLocaleDateString('zh-CN'):'日期未知'}</div></div>`}).join(''):'<div class="empty">暂无可用重置卡</div>';
-        const events=data.events||[];$('events').innerHTML=events.length?events.map(e=>`<div class="event" data-type="${esc(e.type)}"><span class="dot"></span><div><div class="event-title">${esc(e.title)}</div><div class="event-desc">${esc(e.description)}</div></div><span class="event-time">${new Date(e.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</span></div>`).join(''):'<div class="empty">暂无活动记录</div>';drawChart(data);schedule(data.refreshSeconds);}
-      function drawChart(data){const canvas=$('chart'),dpr=devicePixelRatio||1,w=Math.max(1,canvas.clientWidth),h=Math.max(1,canvas.clientHeight);canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);const rows=(data.history||[]).filter(x=>x.remainingPercent!=null),start=new Date(data.period.start).getTime(),end=new Date(data.period.end).getTime(),pad={l:42,r:14,t:12,b:28};$('chartEmpty').hidden=rows.length>0;if(!rows.length)return;c.font='10px Segoe UI';c.strokeStyle='#223044';c.fillStyle='#7f91a8';c.lineWidth=1;for(let i=0;i<=4;i++){const y=pad.t+(h-pad.t-pad.b)*i/4;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();c.fillText(`${100-i*25}%`,4,y+3)}for(let i=0;i<=4;i++){const x=pad.l+(w-pad.l-pad.r)*i/4,d=new Date(start+(end-start)*i/4);c.fillText(`${two(d.getHours())}:${two(d.getMinutes())}`,x-14,h-7)}c.beginPath();rows.forEach((r,i)=>{const x=pad.l+(new Date(r.timestamp)-start)/(end-start)*(w-pad.l-pad.r),y=pad.t+(100-r.remainingPercent)/100*(h-pad.t-pad.b);i?c.lineTo(x,y):c.moveTo(x,y)});c.strokeStyle='#42d9ff';c.lineWidth=2.5;c.shadowColor='#42d9ff66';c.shadowBlur=7;c.stroke();c.shadowBlur=0;}
+        const events=data.events||[];$('events').innerHTML=events.length?events.map(e=>`<div class="event" data-type="${esc(e.type)}"><span class="dot"></span><div><div class="event-title">${esc(e.title)}</div><div class="event-desc">${esc(e.description)}</div></div><span class="event-time">${new Date(e.timestamp).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</span></div>`).join(''):'<div class="empty">暂无活动记录</div>';$('modeNote').textContent=chartMode==='consumption'?'每根柱为该小时累计消耗':'';drawChart(data);schedule(data.refreshSeconds);}
+      function drawChart(data){
+        const canvas=$('chart'),dpr=devicePixelRatio||1,w=Math.max(1,canvas.clientWidth),h=Math.max(1,canvas.clientHeight);
+        canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
+        const consumption=chartMode==='consumption',rows=consumption?(data.consumptionHistory||[]):(data.history||[]).filter(x=>x.remainingPercent!=null);
+        const start=new Date(data.period.start).getTime(),end=new Date(data.period.end).getTime(),narrow=w<420,pad={l:44,r:14,t:narrow?48:34,b:28};
+        chartPoints=[];$('chartTooltip').hidden=true;$('chartEmpty').textContent=consumption?'此时间段暂无可计算的消耗 · 至少需要两次有效记录':'此时间段暂无记录';$('chartEmpty').hidden=rows.length>0;if(!rows.length||end<=start)return;
+        const axisMax=consumption?consumptionAxisMax(rows):100,plotWidth=w-pad.l-pad.r,plotHeight=h-pad.t-pad.b;
+        const xFor=r=>pad.l+(new Date(r.timestamp).getTime()-start)/(end-start)*plotWidth;
+        const value=r=>consumption?r.consumedPercent:r.remainingPercent;
+        const yFor=r=>pad.t+(1-value(r)/axisMax)*plotHeight;
+        c.font='10px Segoe UI';c.strokeStyle='#223044';c.lineWidth=1;
+        for(let i=0;i<=4;i++){
+          const y=pad.t+plotHeight*i/4;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();
+          c.fillStyle=consumption?'#48e5a4':'#7f91a8';c.textAlign='left';c.fillText(percent(axisMax*(4-i)/4),4,y+3);
+        }
+        c.fillStyle='#7f91a8';c.textAlign='center';
+        for(let i=0;i<=4;i++){const x=pad.l+plotWidth*i/4,d=new Date(start+(end-start)*i/4);c.fillText(`${two(d.getHours())}:${two(d.getMinutes())}`,x,h-7)}
+        if(consumption){
+          const hourMs=(data.consumptionUnitSeconds||3600)*1000,slotCount=Math.max(1,Math.ceil((end-start)/hourMs)+1);
+          const naturalWidth=plotWidth/slotCount*.62,barWidth=Math.min(14,Math.max(slotCount<=25?7:2,naturalWidth));
+          c.fillStyle='#48e5a4';
+          rows.forEach(r=>{
+            const x=Math.max(pad.l+barWidth/2,Math.min(w-pad.r-barWidth/2,xFor(r)+hourMs/2/(end-start)*plotWidth));
+            const barHeight=Math.max(2,Math.min(plotHeight,Math.max(0,Number(r.consumedPercent)||0)/axisMax*plotHeight));
+            c.fillRect(x-barWidth/2,pad.t+plotHeight-barHeight,barWidth,barHeight);
+            chartPoints.push({row:r,x,hitWidth:Math.max(10,barWidth/2+5)});
+          });
+        }else{
+          c.strokeStyle='#42d9ff';c.lineWidth=2.5;c.beginPath();
+          rows.forEach((r,i)=>{const x=xFor(r),y=yFor(r);i?c.lineTo(x,y):c.moveTo(x,y)});
+          c.stroke();chartPoints=rows.map(r=>({row:r,x:xFor(r),hitWidth:20}));
+        }
+        const latest=rows[rows.length-1];c.font='11px Segoe UI';c.textAlign='left';
+        c.fillStyle=consumption?'#48e5a4':'#42d9ff';c.fillRect(pad.l,9,12,3);c.fillText(consumption?(narrow?`每小时消耗 ${percent(value(latest))}`:`每小时消耗 ${percent(value(latest))} · 刻度上限 ${percent(axisMax)}`):`剩余 ${percent(value(latest))}`,pad.l+18,14);
+      }
+      $('chart').addEventListener('pointermove',e=>{
+        const canvas=$('chart'),tip=$('chartTooltip'),rect=canvas.getBoundingClientRect();
+        const x=(e.clientX-rect.left)*canvas.clientWidth/rect.width,y=(e.clientY-rect.top)*canvas.clientHeight/rect.height;
+        const nearest=chartPoints.reduce((best,p)=>!best||Math.abs(p.x-x)<Math.abs(best.x-x)?p:best,null);
+        if(!nearest||Math.abs(nearest.x-x)>nearest.hitWidth){tip.hidden=true;return}
+        const row=nearest.row;tip.textContent=chartMode==='consumption'?`${localDate(row.timestamp)} · 每小时消耗 ${percent(row.consumedPercent)}`:`${localDate(row.timestamp)} · 剩余 ${percent(row.remainingPercent)}`;
+        tip.hidden=false;tip.style.left=`${Math.min(canvas.clientWidth-tip.offsetWidth-4,Math.max(4,x+12))}px`;
+        tip.style.top=`${Math.max(4,y-tip.offsetHeight-10)}px`;
+      });
+      $('chart').addEventListener('pointerleave',()=>{$('chartTooltip').hidden=true});
       function schedule(seconds){clearTimeout(timer);timer=setTimeout(load,Math.max(10,Number(seconds)||30)*1000)}
       async function load(){try{const q=new URLSearchParams(period==='rolling'?{period,hours}:{period});const r=await fetch(`/api/dashboard?${q}`,{cache:'no-store'});if(!r.ok)throw Error();render(await r.json());$('error').classList.remove('show')}catch(_){$('error').classList.add('show');schedule(30)}}
-      function fitDashboard(){const scale=Math.min(1,innerWidth/designWidth,innerHeight/designHeight);shell.style.setProperty('--dashboard-scale',String(Math.max(.1,scale)));if(current)drawChart(current)}
-      document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');period=b.dataset.period||'rolling';hours=Number(b.dataset.hours||24);load()}));addEventListener('resize',fitDashboard);fitDashboard();setInterval(updateClock,1000);load();
+      function fitDashboard(){const stacked=matchMedia('(orientation:portrait), (max-width:900px)').matches,scale=stacked?1:Math.min(1,innerWidth/designWidth,innerHeight/designHeight);shell.style.setProperty('--dashboard-scale',String(Math.max(.1,scale)));if(current)requestAnimationFrame(()=>drawChart(current))}
+      document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');period=b.dataset.period||'rolling';hours=Number(b.dataset.hours||24);load()}));
+      document.querySelectorAll('.mode-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');chartMode=b.dataset.mode;$('modeNote').textContent=chartMode==='consumption'?'每根柱为该小时累计消耗':'';$('chart').setAttribute('aria-label',chartMode==='consumption'?'每小时消耗柱状图':'额度剩余历史曲线');if(current)drawChart(current)}));
+      addEventListener('resize',fitDashboard);fitDashboard();setInterval(updateClock,1000);load();
     })();
   </script>
 </body>
