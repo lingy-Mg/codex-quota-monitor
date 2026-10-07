@@ -111,15 +111,20 @@ class MonitorController extends AsyncNotifier<DashboardState> {
   @override
   Future<DashboardState> build() async {
     final credentials = await _store.read();
-    final last = await _db.lastSnapshot();
-    final lastUsage = last == null ? null : usageFromSnapshot(last);
+    final last = await _db.lastSnapshots();
+    final lastUsage = last.isEmpty ? null : usageFromSnapshots(last);
     final initial = DashboardState(
       credentials: credentials,
       usage: lastUsage,
-      lastSync: last?.timestamp.toLocal(),
+      lastSync: last.isEmpty
+          ? null
+          : last
+                .map((snapshot) => snapshot.timestamp)
+                .reduce((a, b) => a.isAfter(b) ? a : b)
+                .toLocal(),
       health: credentials == null
           ? MonitorHealth.auth
-          : (last == null ? MonitorHealth.loading : MonitorHealth.offline),
+          : (last.isEmpty ? MonitorHealth.loading : MonitorHealth.offline),
       events: await _db.recentEvents(),
     );
     final settings = await ref.read(settingsProvider.future);
@@ -325,16 +330,23 @@ class MonitorController extends AsyncNotifier<DashboardState> {
   }
 }
 
+CodexUsageResponse usageFromSnapshots(List<QuotaSnapshot> snapshots) {
+  Map<String, Object?> windowJson(QuotaSnapshot snapshot) => {
+    'used_percent': snapshot.usedPercent,
+    'limit_window_seconds': snapshot.windowDurationSeconds,
+    'reset_at': snapshot.resetAt == null
+        ? null
+        : snapshot.resetAt!.toUtc().millisecondsSinceEpoch ~/ 1000,
+  };
+
+  return CodexUsageResponse.fromJson({
+    'plan_type': snapshots.firstOrNull?.planType,
+    'rate_limit': {
+      if (snapshots.isNotEmpty) 'primary_window': windowJson(snapshots.first),
+      if (snapshots.length > 1) 'secondary_window': windowJson(snapshots[1]),
+    },
+  });
+}
+
 CodexUsageResponse usageFromSnapshot(QuotaSnapshot snapshot) =>
-    CodexUsageResponse.fromJson({
-      'plan_type': snapshot.planType,
-      'rate_limit': {
-        'primary_window': {
-          'used_percent': snapshot.usedPercent,
-          'limit_window_seconds': snapshot.windowDurationSeconds,
-          'reset_at': snapshot.resetAt == null
-              ? null
-              : snapshot.resetAt!.millisecondsSinceEpoch ~/ 1000,
-        },
-      },
-    });
+    usageFromSnapshots([snapshot]);

@@ -1,4 +1,5 @@
 import 'package:codex_quota_monitor/app/monitor_controller.dart';
+import 'package:codex_quota_monitor/app/settings.dart';
 import 'package:codex_quota_monitor/app/theme.dart';
 import 'package:codex_quota_monitor/core/models.dart';
 import 'package:codex_quota_monitor/database/app_database.dart';
@@ -72,6 +73,17 @@ DashboardState preview() => DashboardState(
     },
   ),
 );
+
+class _TestSettingsController extends SettingsController {
+  @override
+  Future<AppSettings> build() async => const AppSettings();
+
+  @override
+  Future<void> saveSettings(AppSettings value) async {
+    state = AsyncData(value);
+  }
+}
+
 void main() {
   for (final size in const [
     Size(1280, 800),
@@ -87,7 +99,10 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [databaseProvider.overrideWithValue(db)],
+          overrides: [
+            databaseProvider.overrideWithValue(db),
+            settingsProvider.overrideWith(_TestSettingsController.new),
+          ],
           child: MaterialApp(
             theme: monitorTheme(),
             home: DashboardPage(
@@ -120,7 +135,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -167,7 +185,10 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [databaseProvider.overrideWithValue(db)],
+          overrides: [
+            databaseProvider.overrideWithValue(db),
+            settingsProvider.overrideWith(_TestSettingsController.new),
+          ],
           child: MaterialApp(
             theme: monitorTheme(),
             home: DashboardPage(preview: preview()),
@@ -184,6 +205,91 @@ void main() {
       expect(find.text('暂无已记录的额度数据'), findsNothing);
     },
   );
+
+  testWidgets('history charts keep five-hour and weekly windows separate', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final now = DateTime(2026, 8, 23, 14, 35);
+    final shortReset = now.add(const Duration(hours: 3));
+    final weekReset = now.add(const Duration(days: 5));
+    CodexUsageResponse usage(int shortUsed, int weekUsed) =>
+        CodexUsageResponse.fromJson({
+          'rate_limit': {
+            'primary_window': {
+              'used_percent': shortUsed,
+              'limit_window_seconds': 18000,
+              'reset_at': shortReset.millisecondsSinceEpoch ~/ 1000,
+            },
+            'secondary_window': {
+              'used_percent': weekUsed,
+              'limit_window_seconds': 604800,
+              'reset_at': weekReset.millisecondsSinceEpoch ~/ 1000,
+            },
+          },
+        });
+    await db.saveUsage(
+      usage(20, 40),
+      now.subtract(const Duration(minutes: 10)),
+    );
+    await db.saveUsage(usage(22, 41), now.subtract(const Duration(minutes: 5)));
+    await db.saveUsage(usage(25, 43), now);
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
+        child: MaterialApp(
+          theme: monitorTheme(),
+          home: DashboardPage(
+            now: () => now,
+            preview: DashboardState(
+              health: MonitorHealth.live,
+              lastSync: now,
+              usage: usage(25, 43),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final lineChart = tester.widget<LineChart>(find.byType(LineChart));
+    expect(
+      lineChart.data.lineBarsData.any((line) => line.color == AppColors.cyan),
+      isTrue,
+    );
+    expect(
+      lineChart.data.lineBarsData.any((line) => line.color == AppColors.green),
+      isTrue,
+    );
+    expect(find.textContaining('5小时 剩余'), findsOneWidget);
+    expect(find.textContaining('周 剩余'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('history-mode-consumption')));
+    await tester.pump(const Duration(milliseconds: 100));
+    final barChart = tester.widget<BarChart>(find.byType(BarChart));
+    expect(
+      barChart.data.barGroups.any(
+        (group) =>
+            group.barRods.length == 2 &&
+            group.barRods[0].color == AppColors.cyan &&
+            group.barRods[1].color == AppColors.green,
+      ),
+      isTrue,
+    );
+    expect(find.textContaining('5小时 每小时消耗'), findsOneWidget);
+    expect(find.textContaining('周 每小时消耗'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(DashboardPage),
+      matchesGoldenFile('goldens/dashboard_consumption_dual_1280x800.png'),
+    );
+  });
 
   testWidgets('24-hour history is rolling and has readable bottom ticks', (
     tester,
@@ -202,7 +308,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -255,7 +364,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -328,7 +440,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -387,7 +502,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -444,7 +562,7 @@ void main() {
     final consumptionChart = tester.widget<BarChart>(find.byType(BarChart));
     expect(consumptionChart.data.maxY, 5);
     final consumptionBars = consumptionChart.data.barGroups
-        .where((group) => group.barRods.first.color == AppColors.green)
+        .where((group) => group.barRods.first.color == AppColors.cyan)
         .toList();
     expect(consumptionBars, hasLength(2));
     expect(consumptionBars.map((group) => group.barRods.single.toY), [2, 3]);
@@ -492,7 +610,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -513,7 +634,7 @@ void main() {
     await tester.pumpAndSettle();
     final chart = tester.widget<BarChart>(find.byType(BarChart));
     final measuredBars = chart.data.barGroups
-        .where((group) => group.barRods.first.color == AppColors.green)
+        .where((group) => group.barRods.first.color == AppColors.cyan)
         .toList();
     expect(measuredBars, hasLength(24));
     expect(
@@ -554,7 +675,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          settingsProvider.overrideWith(_TestSettingsController.new),
+        ],
         child: MaterialApp(
           theme: monitorTheme(),
           home: DashboardPage(
@@ -581,7 +705,7 @@ void main() {
       expect(chart.data.barGroups, hasLength(slots));
       expect(
         chart.data.barGroups.where(
-          (group) => group.barRods.first.color == AppColors.green,
+          (group) => group.barRods.first.color == AppColors.cyan,
         ),
         hasLength(measured),
       );

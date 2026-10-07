@@ -398,6 +398,67 @@ class _History extends ConsumerStatefulWidget {
 
 enum _HistoryChartMode { remaining, consumption }
 
+class _QuotaHistorySeries {
+  const _QuotaHistorySeries({
+    required this.durationSeconds,
+    required this.color,
+    required this.rows,
+    required this.consumptionRows,
+  });
+
+  final int durationSeconds;
+  final Color color;
+  final List<QuotaSnapshot> rows;
+  final List<HistoryConsumptionBucket> consumptionRows;
+
+  String get label => quotaWindowLabel(durationSeconds);
+}
+
+Color _quotaSeriesColor(int durationSeconds) =>
+    durationSeconds == const Duration(days: 7).inSeconds
+    ? AppColors.green
+    : AppColors.cyan;
+
+List<_QuotaHistorySeries> _quotaHistorySeries(
+  List<QuotaSnapshot> rows, {
+  required Duration range,
+  required DateTime start,
+  required DateTime end,
+  required Duration unit,
+}) {
+  final durations =
+      rows
+          .map((row) => row.windowDurationSeconds)
+          .whereType<int>()
+          .toSet()
+          .toList()
+        ..sort();
+  return durations.map((duration) {
+    final windowRows = rows
+        .where((row) => row.windowDurationSeconds == duration)
+        .toList();
+    return _QuotaHistorySeries(
+      durationSeconds: duration,
+      color: _quotaSeriesColor(duration),
+      rows: sample(windowRows, range),
+      consumptionRows: historyConsumptionBuckets(
+        [
+          for (final row in windowRows)
+            (
+              timestamp: row.timestamp,
+              usedPercent: row.usedPercent,
+              resetAt: row.resetAt,
+              windowDurationSeconds: row.windowDurationSeconds,
+            ),
+        ],
+        start: start,
+        end: end,
+        unit: unit,
+      ),
+    );
+  }).toList();
+}
+
 class _HistoryState extends ConsumerState<_History> {
   _HistoryChartMode _chartMode = _HistoryChartMode.remaining;
   final BoundedCache<String, List<QuotaSnapshot>> _cache = BoundedCache(
@@ -629,31 +690,26 @@ class _HistoryState extends ConsumerState<_History> {
                   );
                 }
                 final chartDuration = period.end.difference(period.start);
-                final remainingRows = sample(
-                  _visibleRows
-                      .where((row) => row.remainingPercent != null)
-                      .toList(),
-                  chartDuration,
-                );
-                final consumptionRows = historyConsumptionBuckets(
-                  [
-                    for (final row in _visibleRows)
-                      (
-                        timestamp: row.timestamp,
-                        usedPercent: row.usedPercent,
-                        resetAt: row.resetAt,
-                        windowDurationSeconds: row.windowDurationSeconds,
-                      ),
-                  ],
+                final historySeries = _quotaHistorySeries(
+                  _visibleRows,
+                  range: chartDuration,
                   start: period.start,
                   end: period.observedEnd(widget.asOf),
                   unit: consumptionUnit,
                 );
+                final remainingSeries = historySeries
+                    .where((series) => series.rows.isNotEmpty)
+                    .toList();
+                final consumptionSeries = historySeries
+                    .where((series) => series.consumptionRows.isNotEmpty)
+                    .toList();
                 final isConsumption =
                     _chartMode == _HistoryChartMode.consumption;
                 final axisMax = isConsumption
                     ? historyConsumptionAxisMax(
-                        consumptionRows.map((row) => row.consumedPercent),
+                        consumptionSeries
+                            .expand((series) => series.consumptionRows)
+                            .map((row) => row.consumedPercent),
                       )
                     : 100.0;
                 final minX = period.start.millisecondsSinceEpoch.toDouble();
@@ -662,19 +718,22 @@ class _HistoryState extends ConsumerState<_History> {
                 final forecastEnabled =
                     !isConsumption &&
                     widget.periodKind == HistoryPeriodKind.refreshCycle;
+                final shortSeries = remainingSeries.firstOrNull;
                 final forecast = forecastEnabled
-                    ? forecastRemainingQuota(
-                        remainingRows
-                            .map(
-                              (row) => RemainingQuotaObservation(
-                                timestamp: row.timestamp.toLocal(),
-                                remainingPercent: row.remainingPercent!,
-                              ),
+                    ? shortSeries == null
+                          ? null
+                          : forecastRemainingQuota(
+                              shortSeries.rows
+                                  .map(
+                                    (row) => RemainingQuotaObservation(
+                                      timestamp: row.timestamp.toLocal(),
+                                      remainingPercent: row.remainingPercent!,
+                                    ),
+                                  )
+                                  .toList(),
+                              asOf: widget.asOf,
+                              periodEnd: period.end,
                             )
-                            .toList(),
-                        asOf: widget.asOf,
-                        periodEnd: period.end,
-                      )
                     : null;
                 return LayoutBuilder(
                   builder: (context, constraints) => MouseRegion(
@@ -694,7 +753,7 @@ class _HistoryState extends ConsumerState<_History> {
                           if (isConsumption)
                             _consumptionBarChart(
                               period: period,
-                              rows: consumptionRows,
+                              series: consumptionSeries,
                               unit: consumptionUnit,
                               axisMax: axisMax,
                               width: constraints.maxWidth,
@@ -769,18 +828,20 @@ class _HistoryState extends ConsumerState<_History> {
                                             .timestamp
                                             .millisecondsSinceEpoch
                                             .toDouble(),
-                                        color: selected.isForecast
-                                            ? AppColors.purple
-                                            : isConsumption
-                                            ? AppColors.green
-                                            : AppColors.cyan,
+                                        color:
+                                            selected.seriesColor ??
+                                            (selected.isForecast
+                                                ? AppColors.purple
+                                                : isConsumption
+                                                ? AppColors.green
+                                                : AppColors.cyan),
                                         strokeWidth: 1,
                                         dashArray: const [3, 3],
                                       ),
                                   ],
                                 ),
                                 lineBarsData: _historyLineBars(
-                                  remainingRows,
+                                  remainingSeries,
                                   period: period,
                                   asOf: widget.asOf,
                                   range: chartDuration,
@@ -804,9 +865,8 @@ class _HistoryState extends ConsumerState<_History> {
                                         '${point.valuesLabel}',
                                         TextStyle(
                                           color:
-                                              spot.bar.color == AppColors.purple
-                                              ? AppColors.purple
-                                              : AppColors.text,
+                                              point.seriesColor ??
+                                              AppColors.text,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -817,8 +877,8 @@ class _HistoryState extends ConsumerState<_History> {
                               ),
                             ),
                           if (isConsumption
-                              ? consumptionRows.isEmpty
-                              : remainingRows.isEmpty)
+                              ? consumptionSeries.isEmpty
+                              : remainingSeries.isEmpty)
                             Center(
                               child: IgnorePointer(
                                 child: _hasLoaded
@@ -841,22 +901,26 @@ class _HistoryState extends ConsumerState<_History> {
                               ),
                             ),
                           if (isConsumption
-                              ? consumptionRows.isNotEmpty
-                              : remainingRows.isNotEmpty)
+                              ? consumptionSeries.isNotEmpty
+                              : remainingSeries.isNotEmpty)
                             Positioned(
                               top: 2,
                               left: 34,
                               child: IgnorePointer(
-                                child: _HistoryValueLegend(
-                                  label: isConsumption
-                                      ? historyConsumptionValueLabel(
-                                          consumptionUnit,
-                                          consumptionRows.last.consumedPercent,
-                                        )
-                                      : '剩余 ${historyPercentLabel(remainingRows.last.remainingPercent!)}',
-                                  color: isConsumption
-                                      ? AppColors.green
-                                      : AppColors.cyan,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    for (final series
+                                        in (isConsumption
+                                            ? consumptionSeries
+                                            : remainingSeries))
+                                      _HistoryValueLegend(
+                                        label: isConsumption
+                                            ? '${series.label} ${historyConsumptionValueLabel(consumptionUnit, series.consumptionRows.last.consumedPercent)}'
+                                            : '${series.label} 剩余 ${historyPercentLabel(series.rows.last.remainingPercent!)}',
+                                        color: series.color,
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1075,45 +1139,47 @@ List<QuotaSnapshot> sample(List<QuotaSnapshot> rows, Duration range) {
 /// a newly-started chart, and the not-yet-elapsed calendar time visible rather
 /// than pretending they are measured values.
 List<LineChartBarData> _historyLineBars(
-  List<QuotaSnapshot> rows, {
+  List<_QuotaHistorySeries> seriesData, {
   required HistoryPeriod period,
   required DateTime asOf,
   required Duration range,
   RemainingQuotaForecast? forecast,
 }) {
   final observedEnd = period.observedEnd(asOf);
-  final visibleRows = rows
-      .where(
-        (row) =>
-            !row.timestamp.isBefore(period.start) &&
-            !row.timestamp.isAfter(observedEnd),
-      )
-      .toList();
-  final remainingPoints = visibleRows
-      .map(
-        (row) => FlSpot(
-          row.timestamp.millisecondsSinceEpoch.toDouble(),
-          row.remainingPercent!,
-        ),
-      )
-      .toList();
-  if (remainingPoints.isEmpty) return const [];
-  return [
-    ..._historySeriesLines(
-      remainingPoints,
-      period: period,
-      observedEnd: observedEnd,
-      range: range,
-      color: AppColors.cyan,
-      fill: true,
-    ),
-    if (forecast != null) _forecastLine(forecast),
-  ];
+  final lines = <LineChartBarData>[];
+  for (final series in seriesData) {
+    final remainingPoints = series.rows
+        .where(
+          (row) =>
+              row.remainingPercent != null &&
+              !row.timestamp.isBefore(period.start) &&
+              !row.timestamp.isAfter(observedEnd),
+        )
+        .map(
+          (row) => FlSpot(
+            row.timestamp.millisecondsSinceEpoch.toDouble(),
+            row.remainingPercent!,
+          ),
+        )
+        .toList();
+    lines.addAll(
+      _historySeriesLines(
+        remainingPoints,
+        period: period,
+        observedEnd: observedEnd,
+        range: range,
+        color: series.color,
+        fill: series.durationSeconds != const Duration(days: 7).inSeconds,
+      ),
+    );
+  }
+  if (forecast != null) lines.add(_forecastLine(forecast));
+  return lines;
 }
 
 Widget _consumptionBarChart({
   required HistoryPeriod period,
-  required List<HistoryConsumptionBucket> rows,
+  required List<_QuotaHistorySeries> series,
   required Duration unit,
   required double axisMax,
   required double width,
@@ -1133,13 +1199,21 @@ Widget _consumptionBarChart({
     slots.add(slot);
     slot = slot.add(unit);
   }
-  final values = <int, HistoryConsumptionBucket>{};
-  for (final row in rows) {
-    final index =
-        row.timestamp.difference(slots.first).inMilliseconds ~/ unitMs;
-    if (index >= 0 && index < slots.length) values[index] = row;
+  final values = <int, Map<int, HistoryConsumptionBucket>>{};
+  for (final window in series) {
+    for (final row in window.consumptionRows) {
+      final index =
+          row.timestamp.difference(slots.first).inMilliseconds ~/ unitMs;
+      if (index >= 0 && index < slots.length) {
+        values.putIfAbsent(window.durationSeconds, () => {})[index] = row;
+      }
+    }
   }
-  final barWidth = _consumptionBarWidth(width, slots.length);
+  final barWidth = _consumptionBarWidth(
+    width,
+    slots.length,
+    seriesCount: series.length,
+  );
   final labelStep = (slots.length / 4).ceil().clamp(1, 48);
   final duration = period.end.difference(period.start);
   return BarChart(
@@ -1151,22 +1225,22 @@ Widget _consumptionBarChart({
         for (var index = 0; index < slots.length; index++)
           BarChartGroupData(
             x: index,
+            barsSpace: 2,
             barRods: [
-              BarChartRodData(
-                toY: values[index] == null
-                    ? 0
-                    : values[index]!.consumedPercent.clamp(
-                        axisMax * .012,
-                        axisMax,
-                      ),
-                width: barWidth,
-                color: values[index] == null
-                    ? Colors.transparent
-                    : AppColors.green,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(2),
+              for (final window in series)
+                BarChartRodData(
+                  toY:
+                      values[window.durationSeconds]?[index]?.consumedPercent
+                          .clamp(axisMax * .012, axisMax) ??
+                      0,
+                  width: barWidth,
+                  color: values[window.durationSeconds]?[index] == null
+                      ? Colors.transparent
+                      : window.color,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(2),
+                  ),
                 ),
-              ),
             ],
           ),
       ],
@@ -1235,8 +1309,15 @@ Widget _consumptionBarChart({
         touchExtraThreshold: const EdgeInsets.symmetric(horizontal: 4),
         touchCallback: (event, response) {
           if (event is! FlTapUpEvent) return;
-          final index = response?.spot?.touchedBarGroupIndex;
-          final row = index == null ? null : values[index];
+          final spot = response?.spot;
+          final index = spot?.touchedBarGroupIndex;
+          final rodIndex = spot?.touchedRodDataIndex;
+          final window = rodIndex != null && rodIndex < series.length
+              ? series[rodIndex]
+              : null;
+          final row = index == null || window == null
+              ? null
+              : values[window.durationSeconds]?[index];
           onSelected(
             row == null
                 ? null
@@ -1246,6 +1327,8 @@ Widget _consumptionBarChart({
                     isForecast: false,
                     mode: _HistoryChartMode.consumption,
                     consumptionUnit: unit,
+                    seriesLabel: window!.label,
+                    seriesColor: window.color,
                   ),
           );
         },
@@ -1254,13 +1337,14 @@ Widget _consumptionBarChart({
           fitInsideVertically: true,
           maxContentWidth: 190,
           getTooltipItem: (group, groupIndex, rod, rodIndex) {
-            final row = values[groupIndex];
+            final window = series[rodIndex];
+            final row = values[window.durationSeconds]?[groupIndex];
             if (row == null) return null;
             return BarTooltipItem(
-              '记录时间 ${DateFormat('MM-dd HH:mm').format(row.timestamp)}\n'
+              '${window.label} · ${DateFormat('MM-dd HH:mm').format(row.timestamp)}\n'
               '${historyConsumptionValueLabel(unit, row.consumedPercent)}',
-              const TextStyle(
-                color: AppColors.text,
+              TextStyle(
+                color: window.color,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -1272,9 +1356,13 @@ Widget _consumptionBarChart({
   );
 }
 
-double _consumptionBarWidth(double chartWidth, int slotCount) {
+double _consumptionBarWidth(
+  double chartWidth,
+  int slotCount, {
+  required int seriesCount,
+}) {
   final space = (chartWidth - 50).clamp(1.0, double.infinity);
-  final natural = space / slotCount * .62;
+  final natural = space / slotCount * .62 / seriesCount;
   return natural.clamp(slotCount <= 25 ? 7.0 : 2.0, 14.0);
 }
 
@@ -1422,6 +1510,8 @@ class _HistoryTouchPoint {
     required this.isForecast,
     required this.mode,
     this.consumptionUnit,
+    this.seriesLabel,
+    this.seriesColor,
   });
 
   final DateTime timestamp;
@@ -1429,10 +1519,12 @@ class _HistoryTouchPoint {
   final bool isForecast;
   final _HistoryChartMode mode;
   final Duration? consumptionUnit;
+  final String? seriesLabel;
+  final Color? seriesColor;
 
   String get valuesLabel => mode == _HistoryChartMode.consumption
-      ? historyConsumptionValueLabel(consumptionUnit!, value)
-      : '剩余 ${historyPercentLabel(value)}';
+      ? '${seriesLabel ?? ''} ${historyConsumptionValueLabel(consumptionUnit!, value)}'
+      : '${seriesLabel ?? ''} 剩余 ${historyPercentLabel(value)}';
 }
 
 _HistoryTouchPoint _historyTouchPoint(LineBarSpot spot) => _HistoryTouchPoint(
@@ -1440,6 +1532,8 @@ _HistoryTouchPoint _historyTouchPoint(LineBarSpot spot) => _HistoryTouchPoint(
   value: spot.y,
   isForecast: spot.bar.color == AppColors.purple,
   mode: _HistoryChartMode.remaining,
+  seriesLabel: spot.bar.color == AppColors.green ? '周' : '5小时',
+  seriesColor: spot.bar.color,
 );
 
 class _HistoryValueLegend extends StatelessWidget {
@@ -1475,11 +1569,13 @@ class _HistoryTouchLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = point.isForecast
-        ? AppColors.purple
-        : point.mode == _HistoryChartMode.consumption
-        ? AppColors.green
-        : AppColors.cyan;
+    final color =
+        point.seriesColor ??
+        (point.isForecast
+            ? AppColors.purple
+            : point.mode == _HistoryChartMode.consumption
+            ? AppColors.green
+            : AppColors.cyan);
     return Semantics(
       label:
           '${point.isForecast ? '预测' : '记录'}时间 '

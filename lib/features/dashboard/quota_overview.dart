@@ -24,6 +24,7 @@ class QuotaOverview extends StatelessWidget {
   Widget build(BuildContext context) {
     final windows = usage?.rateLimit.windows ?? const <RateWindow>[];
     final window = windows.firstOrNull;
+    final secondaryWindow = windows.length > 1 ? windows[1] : null;
     final remaining = window?.resetAt?.difference(now);
     if (remaining != null && remaining <= Duration.zero) {
       WidgetsBinding.instance.addPostFrameCallback((_) => onExpired());
@@ -39,7 +40,12 @@ class QuotaOverview extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 11,
-                  child: _CurrentQuota(window: window, now: now, stale: stale),
+                  child: _CurrentQuota(
+                    window: window,
+                    secondaryWindow: secondaryWindow,
+                    now: now,
+                    stale: stale,
+                  ),
                 ),
                 const Divider(height: 18, color: AppColors.divider),
                 Expanded(
@@ -82,11 +88,13 @@ class _Panel extends StatelessWidget {
 class _CurrentQuota extends StatelessWidget {
   const _CurrentQuota({
     required this.window,
+    required this.secondaryWindow,
     required this.now,
     required this.stale,
   });
 
   final RateWindow? window;
+  final RateWindow? secondaryWindow;
   final DateTime now;
   final bool stale;
 
@@ -110,7 +118,7 @@ class _CurrentQuota extends StatelessWidget {
                 _BigText(
                   '${window?.remainingPercent?.round() ?? '--'}%',
                   size: compact ? 30 : 44,
-                  color: AppColors.cyan,
+                  color: _quotaColor(window?.remainingPercent),
                 ),
                 const SizedBox(width: 6),
                 const Text(
@@ -133,10 +141,12 @@ class _CurrentQuota extends StatelessWidget {
               ],
             ),
             _PairedTrack(window: window, now: now),
+            if (secondaryWindow != null)
+              _SecondaryQuotaLine(window: secondaryWindow!, now: now),
             Row(
               children: [
                 Text(
-                  '${windowLabel(window?.durationSeconds)}周期',
+                  '${quotaWindowLabel(window?.durationSeconds)}周期',
                   style: const TextStyle(
                     color: AppColors.secondary,
                     fontSize: 11,
@@ -166,6 +176,50 @@ class _CurrentQuota extends StatelessWidget {
       },
     );
   }
+}
+
+class _SecondaryQuotaLine extends StatelessWidget {
+  const _SecondaryQuotaLine({required this.window, required this.now});
+
+  final RateWindow window;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Row(
+        children: [
+          Text(
+            '${quotaWindowLabel(window.durationSeconds)}额度',
+            key: const ValueKey('quota-secondary-label'),
+            style: const TextStyle(
+              color: AppColors.secondary,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '剩余 ${window.remainingPercent?.round() ?? '--'}%  ·  ${_additionalWindowLabel(window, now)}',
+            key: const ValueKey('quota-secondary-summary'),
+            style: const TextStyle(color: AppColors.secondary, fontSize: 9),
+          ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Semantics(
+        key: const ValueKey('quota-secondary-track'),
+        label:
+            '${quotaWindowLabel(window.durationSeconds)}额度剩余 ${window.remainingPercent?.round() ?? '--'}%',
+        child: _Track(
+          value: window.remainingPercent,
+          color: AppColors.green,
+          height: 5,
+          keyPrefix: 'secondary-quota-segment',
+        ),
+      ),
+    ],
+  );
 }
 
 class _BigText extends StatelessWidget {
@@ -208,15 +262,19 @@ class _PairedTrack extends StatelessWidget {
         children: [
           _Track(
             value: window?.remainingPercent,
-            color: AppColors.cyan,
             height: 16,
-            segments: 7,
+            // The short window is the primary balance, so keep it as one
+            // continuous bar. Longer windows retain the seven-part treatment.
+            segments: window?.durationSeconds == 18000 ? 1 : 7,
+            keyPrefix: 'quota-track-segment',
           ),
           const SizedBox(height: 2),
           _Track(
             value: window?.timeRemainingPercent(now),
             color: AppColors.green,
             height: 8,
+            balanceSensitive: false,
+            keyPrefix: 'time-track-segment',
           ),
         ],
       ),
@@ -227,45 +285,59 @@ class _PairedTrack extends StatelessWidget {
 class _Track extends StatelessWidget {
   const _Track({
     required this.value,
-    required this.color,
+    this.color,
     this.height = 5,
     this.segments = 1,
+    this.keyPrefix = 'quota-track-segment',
+    this.balanceSensitive = true,
   });
   final double? value;
-  final Color color;
+  final Color? color;
   final double height;
   final int segments;
+  final String keyPrefix;
+  final bool balanceSensitive;
 
   @override
   Widget build(BuildContext context) {
     final normalized = (value ?? 0).clamp(0, 100).toDouble();
-    return SizedBox(
-      height: height,
-      child: Row(
-        children: [
-          for (var index = 0; index < segments; index++) ...[
-            if (index > 0) const SizedBox(width: 3),
-            Expanded(
-              child: _TrackSegment(
-                key: ValueKey('quota-track-segment-$segments-$index'),
-                value: ((normalized * segments / 100) - index)
-                    .clamp(0, 1)
-                    .toDouble(),
-                color: color,
+    return TweenAnimationBuilder<double>(
+      // Starting at the current value avoids an empty flash on first load.
+      // Rebuilds animate from the currently displayed value to the new quota.
+      tween: Tween<double>(begin: normalized, end: normalized),
+      duration: const Duration(milliseconds: 2400),
+      curve: Curves.easeInOutCubic,
+      builder: (context, animatedValue, _) => SizedBox(
+        height: height,
+        child: Row(
+          children: [
+            for (var index = 0; index < segments; index++) ...[
+              if (index > 0) const SizedBox(width: 3),
+              Expanded(
+                child: _TrackSegment(
+                  key: ValueKey('$keyPrefix-$segments-$index'),
+                  value: ((animatedValue * segments / 100) - index)
+                      .clamp(0, 1)
+                      .toDouble(),
+                  gradient: _trackGradient(
+                    balanceSensitive && value != null ? animatedValue : null,
+                    fallback: color,
+                  ),
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
 class _TrackSegment extends StatelessWidget {
-  const _TrackSegment({super.key, required this.value, required this.color});
+  const _TrackSegment({super.key, required this.value, required this.gradient});
 
   final double value;
-  final Color color;
+  final Gradient gradient;
 
   @override
   Widget build(BuildContext context) => Stack(
@@ -276,14 +348,44 @@ class _TrackSegment extends StatelessWidget {
         alignment: Alignment.centerLeft,
         widthFactor: value,
         heightFactor: 1,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [color.withValues(alpha: .55), color],
-            ),
-          ),
-        ),
+        child: DecoratedBox(decoration: BoxDecoration(gradient: gradient)),
       ),
+    ],
+  );
+}
+
+Color _quotaColor(double? value) {
+  final remaining = ((value ?? 0).clamp(0, 100)) / 100;
+  const stops = <(double, Color)>[
+    (0, AppColors.error),
+    (.25, Color(0xffF07852)),
+    (.5, AppColors.warning),
+    (.75, Color(0xffA9CE68)),
+    (1, AppColors.green),
+  ];
+  for (var i = 1; i < stops.length; i++) {
+    final (start, startColor) = stops[i - 1];
+    final (end, endColor) = stops[i];
+    if (remaining <= end) {
+      return Color.lerp(
+        startColor,
+        endColor,
+        (remaining - start) / (end - start),
+      )!;
+    }
+  }
+  return AppColors.green;
+}
+
+Gradient _trackGradient(double? remaining, {Color? fallback}) {
+  final color = remaining == null
+      ? fallback ?? AppColors.green
+      : _quotaColor(remaining);
+  return LinearGradient(
+    colors: [
+      Color.lerp(color, Colors.black, .12)!,
+      color,
+      Color.lerp(color, Colors.white, .14)!,
     ],
   );
 }
@@ -553,6 +655,7 @@ class _Additional extends StatelessWidget {
                       value: window?.remainingPercent,
                       color: AppColors.cyan,
                       height: 5,
+                      keyPrefix: 'additional-quota-segment-$index',
                     ),
                   ),
                   Text(

@@ -55,12 +55,21 @@ void bootMonitorEntrypoint() {
   var health = MonitorHealth.offline;
   final webServer = WebDashboardServer(database, () async {
     final settings = await AppSettings.load();
-    final last = latestUsage == null ? await database.lastSnapshot() : null;
+    final last = latestUsage == null
+        ? await database.lastSnapshots()
+        : const <QuotaSnapshot>[];
     return WebDashboardData(
       health: health.name,
       refreshSeconds: settings.refreshSeconds,
-      usage: latestUsage ?? (last == null ? null : usageFromSnapshot(last)),
-      lastSync: latestSync ?? last?.timestamp.toLocal(),
+      usage: latestUsage ?? (last.isEmpty ? null : usageFromSnapshots(last)),
+      lastSync:
+          latestSync ??
+          (last.isEmpty
+              ? null
+              : last
+                    .map((snapshot) => snapshot.timestamp)
+                    .reduce((a, b) => a.isAfter(b) ? a : b)
+                    .toLocal()),
     );
   });
 

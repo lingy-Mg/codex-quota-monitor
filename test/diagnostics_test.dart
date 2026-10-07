@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:codex_quota_monitor/app/monitor_controller.dart';
 import 'package:codex_quota_monitor/core/models.dart';
 import 'package:codex_quota_monitor/database/app_database.dart';
 import 'package:drift/native.dart';
@@ -61,7 +62,7 @@ void main() {
     );
   });
 
-  test('history reads only the live quota window', () async {
+  test('history retains short and weekly quota windows', () async {
     final database = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);
     await database.saveUsage(
@@ -82,8 +83,19 @@ void main() {
 
     final history = await database.snapshots(const Duration(hours: 1));
 
-    expect(history, hasLength(1));
-    expect(history.single.remainingPercent, 55);
+    expect(history, hasLength(2));
+    expect(history.map((row) => row.windowDurationSeconds), [18000, 604800]);
+    expect(history.map((row) => row.remainingPercent), [55, 80]);
+
+    final cachedUsage = usageFromSnapshots(await database.lastSnapshots());
+    expect(
+      cachedUsage.rateLimit.windows.map((window) => window.durationSeconds),
+      [18000, 604800],
+    );
+    expect(
+      cachedUsage.rateLimit.windows.map((window) => window.remainingPercent),
+      [55, 80],
+    );
   });
 
   test(

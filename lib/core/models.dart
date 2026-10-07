@@ -247,6 +247,9 @@ String windowLabel(int? seconds) {
   return '$seconds秒';
 }
 
+String quotaWindowLabel(int? seconds) =>
+    seconds == const Duration(days: 7).inSeconds ? '周' : windowLabel(seconds);
+
 String durationClock(Duration d) {
   if (d.isNegative) return '等待刷新';
   final days = d.inDays > 0 ? '${d.inDays}天 ' : '';

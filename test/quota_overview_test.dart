@@ -18,6 +18,11 @@ void main() {
           durationSeconds: 18000,
           resetAt: now.add(const Duration(hours: 2)),
         ),
+        secondary: RateWindow(
+          usedPercent: 53,
+          durationSeconds: 604800,
+          resetAt: now.add(const Duration(days: 5)),
+        ),
       ),
       additional: [
         AdditionalLimit(
@@ -67,6 +72,9 @@ void main() {
     expect(find.text('GPT Reserve'), findsOneWidget);
     expect(find.text('83%'), findsOneWidget);
     expect(find.text('92%'), findsOneWidget);
+    expect(find.byKey(const ValueKey('quota-secondary-label')), findsOneWidget);
+    expect(find.textContaining('剩余 47%'), findsOneWidget);
+    expect(find.byKey(const ValueKey('quota-secondary-track')), findsOneWidget);
     expect(find.textContaining('7天周期 · 剩余 70%'), findsOneWidget);
     expect(find.text('2026-09-17'), findsOneWidget);
     expect(find.text('99'), findsOneWidget);
@@ -90,12 +98,13 @@ void main() {
       greaterThan(tester.getBottomLeft(find.text('02')).dy),
     );
     final start = tester.getTopLeft(
-      find.byKey(const ValueKey('quota-track-segment-7-0')),
+      find.byKey(const ValueKey('quota-track-segment-1-0')),
     );
     final end = tester.getTopRight(
-      find.byKey(const ValueKey('quota-track-segment-7-6')),
+      find.byKey(const ValueKey('quota-track-segment-1-0')),
     );
     expect(end.dx - start.dx, greaterThan(800));
+    expect(find.byKey(const ValueKey('quota-track-segment-7-0')), findsNothing);
     expect(find.bySemanticsLabel('上层剩余额度 75%，下层剩余时间 40%'), findsOneWidget);
     for (var i = 0; i < 2; i++) {
       final track = find.byKey(ValueKey('additional-track-$i'));
@@ -147,12 +156,102 @@ void main() {
     expect(find.text('当前套餐不支持'), findsOneWidget);
     expect(find.text('Unlimited'), findsOneWidget);
     expect(find.text('暂无附加额度'), findsOneWidget);
+    expect(find.byKey(const ValueKey('quota-secondary-label')), findsNothing);
     await tester.drag(
       find.byKey(const ValueKey('reset-ticket-list')),
       const Offset(-300, 0),
     );
     await tester.pumpAndSettle();
     expect(find.text('到期未知').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('weekly main quota stays primary when no short window exists', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime(2026, 9, 15, 12);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: monitorTheme(),
+        home: Scaffold(
+          body: QuotaOverview(
+            usage: const CodexUsageResponse(
+              rateLimit: CodexRateLimit(
+                primary: RateWindow(usedPercent: 60, durationSeconds: 604800),
+              ),
+              additional: [],
+            ),
+            now: now,
+            stale: false,
+            gap: 12,
+            onExpired: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('周周期'), findsOneWidget);
+    expect(find.text('40%'), findsOneWidget);
+    expect(find.byKey(const ValueKey('quota-secondary-label')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('quota-track-segment-7-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('quota-track-segment-7-6')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('quota fill animates between refreshed values', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime(2026, 9, 15, 12);
+    Widget buildWithRemaining(double remaining) => MaterialApp(
+      theme: monitorTheme(),
+      home: Scaffold(
+        body: QuotaOverview(
+          usage: CodexUsageResponse(
+            rateLimit: CodexRateLimit(
+              primary: RateWindow(
+                usedPercent: 100 - remaining,
+                durationSeconds: 18000,
+                resetAt: now.add(const Duration(hours: 2)),
+              ),
+            ),
+            additional: const [],
+          ),
+          now: now,
+          stale: false,
+          gap: 12,
+          onExpired: () {},
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(buildWithRemaining(80));
+    final fill = find.descendant(
+      of: find.byKey(const ValueKey('quota-track-segment-1-0')),
+      matching: find.byType(FractionallySizedBox),
+    );
+    expect(
+      tester.widget<FractionallySizedBox>(fill).widthFactor,
+      closeTo(.8, .001),
+    );
+
+    await tester.pumpWidget(buildWithRemaining(20));
+    await tester.pump(const Duration(milliseconds: 1200));
+    final halfway = tester.widget<FractionallySizedBox>(fill).widthFactor!;
+    expect(halfway, lessThan(.8));
+    expect(halfway, greaterThan(.2));
+    await tester.pump(const Duration(milliseconds: 1300));
+    expect(
+      tester.widget<FractionallySizedBox>(fill).widthFactor,
+      closeTo(.2, .001),
+    );
     expect(tester.takeException(), isNull);
   });
 }

@@ -131,10 +131,6 @@ class AppDatabase extends _$AppDatabase {
             ..where(
               (t) =>
                   t.bucketId.equals(bucketId) &
-                  // A rate-limit response can carry a short and a long
-                  // window. The dashboard history is the live (shortest)
-                  // window, not a zig-zag mixture of both series.
-                  t.windowType.equals('primary') &
                   t.timestamp.isBiggerOrEqualValue(
                     DateTime.now().toUtc().subtract(range),
                   ),
@@ -153,12 +149,30 @@ class AppDatabase extends _$AppDatabase {
             ..where(
               (t) =>
                   t.bucketId.equals(bucketId) &
-                  t.windowType.equals('primary') &
                   t.timestamp.isBiggerOrEqualValue(start.toUtc()) &
                   t.timestamp.isSmallerThanValue(end.toUtc()),
             )
             ..orderBy([(t) => OrderingTerm.asc(t.timestamp)]))
           .get();
+
+  /// Returns the newest persisted snapshot for each main quota window.
+  /// Older databases may contain only the primary (shortest) window.
+  Future<List<QuotaSnapshot>> lastSnapshots({String bucketId = 'main'}) async {
+    final rows =
+        await (select(quotaSnapshots)
+              ..where((t) => t.bucketId.equals(bucketId))
+              ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]))
+            .get();
+    final latestByDuration = <int?, QuotaSnapshot>{};
+    for (final row in rows) {
+      latestByDuration.putIfAbsent(row.windowDurationSeconds, () => row);
+    }
+    return latestByDuration.values.toList()..sort(
+      (a, b) => (a.windowDurationSeconds ?? 1 << 30).compareTo(
+        b.windowDurationSeconds ?? 1 << 30,
+      ),
+    );
+  }
 
   Future<List<ActivityEvent>> recentEvents([int count = 8]) =>
       (select(activityEvents)
