@@ -32,6 +32,12 @@ flutter build apk --release
 On first run, import the `auth.json` created by your own Codex CLI installation, or paste its content in the app. The release APK is at `build/app/outputs/flutter-apk/app-release.apk`.
 首次运行时，导入你自己的 Codex CLI 生成的 `auth.json`，或在应用中粘贴其内容。正式 APK 位于 `build/app/outputs/flutter-apk/app-release.apk`。
 
+## Automated Android releases / 自动发布 Android 版本
+
+Pushing a change to `main` or starting **Android release** from GitHub Actions increments the patch and Android build numbers in `pubspec.yaml`, builds a signed APK, commits the version change, and publishes a GitHub Release named `v<version>` with the APK attached. For example, `1.0.2+3` becomes `1.0.3+4`.
+
+The workflow signs releases with the same persistent Android key used by the current tablet install, so later APKs can update the app without removing its data. The keystore and signing values are kept in GitHub Actions repository secrets and are never committed.
+
 To view the complete dashboard from a computer, enable **允许局域网 Web 查看** in Settings, then open the displayed `http://<tablet-wifi-ip>:8787` address from a device on the same network. The server resumes with boot monitoring, exposes display data only, and never returns credentials, account IDs, headers, or raw API responses. Disable it when LAN access is not needed; the page intentionally has no login and is reachable by other devices on the same LAN.
 如需在电脑查看完整仪表盘，请在设置中开启 **允许局域网 Web 查看**，然后从同一网络的设备打开页面中显示的 `http://<平板-Wi-Fi-IP>:8787`。服务器会随开机监控恢复，只提供展示数据，不返回凭据、账号 ID、请求头或原始 API 响应。不需要时请关闭；该页面没有登录，同一局域网中的其他设备也能访问。
 

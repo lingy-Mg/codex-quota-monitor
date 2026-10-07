@@ -4,10 +4,32 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val automatedStoreFile = System.getenv("ANDROID_SIGNING_STORE_FILE")
+val automatedStorePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+val automatedKeyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+val automatedKeyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+val hasAutomatedSigning = listOf(
+    automatedStoreFile,
+    automatedStorePassword,
+    automatedKeyAlias,
+    automatedKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.codexmonitor.tablet"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    signingConfigs {
+        if (hasAutomatedSigning) {
+            create("automatedRelease") {
+                storeFile = file(automatedStoreFile!!)
+                storePassword = automatedStorePassword
+                keyAlias = automatedKeyAlias
+                keyPassword = automatedKeyPassword
+            }
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -27,9 +49,13 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the persistent Actions key for automated releases, and keep
+            // the existing local debug key for development builds.
+            signingConfig = if (hasAutomatedSigning) {
+                signingConfigs.getByName("automatedRelease")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
