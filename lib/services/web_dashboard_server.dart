@@ -169,20 +169,32 @@ class WebDashboardServer {
     final history = observedEnd.isAfter(period.start)
         ? await _database.snapshotsBetween(period.start, observedEnd)
         : const <QuotaSnapshot>[];
-    final consumption = historyConsumptionBuckets(
-      [
-        for (final row in history)
-          (
-            timestamp: row.timestamp,
-            usedPercent: row.usedPercent,
-            resetAt: row.resetAt,
-            windowDurationSeconds: row.windowDurationSeconds,
-          ),
-      ],
-      start: period.start,
-      end: observedEnd,
-      unit: consumptionUnit,
-    );
+    final durations =
+        history
+            .map((row) => row.windowDurationSeconds)
+            .whereType<int>()
+            .toSet()
+            .toList()
+          ..sort();
+    final consumption = [
+      for (final durationSeconds in durations)
+        for (final bucket in historyConsumptionBuckets(
+          [
+            for (final row in history)
+              if (row.windowDurationSeconds == durationSeconds)
+                (
+                  timestamp: row.timestamp,
+                  usedPercent: row.usedPercent,
+                  resetAt: row.resetAt,
+                  windowDurationSeconds: row.windowDurationSeconds,
+                ),
+          ],
+          start: period.start,
+          end: observedEnd,
+          unit: consumptionUnit,
+        ))
+          (durationSeconds: durationSeconds, bucket: bucket),
+    ];
     final events = await _database.recentEvents(12);
     return {
       'generatedAt': now.toUtc().toIso8601String(),
@@ -202,14 +214,17 @@ class WebDashboardServer {
             'timestamp': row.timestamp.toUtc().toIso8601String(),
             'remainingPercent': row.remainingPercent,
             'usedPercent': row.usedPercent,
+            'durationSeconds': row.windowDurationSeconds,
+            'windowType': row.windowType,
           },
       ],
       'consumptionUnitSeconds': consumptionUnit.inSeconds,
       'consumptionHistory': [
-        for (final bucket in consumption)
+        for (final item in consumption)
           {
-            'timestamp': bucket.timestamp.toUtc().toIso8601String(),
-            'consumedPercent': bucket.consumedPercent,
+            'timestamp': item.bucket.timestamp.toUtc().toIso8601String(),
+            'consumedPercent': item.bucket.consumedPercent,
+            'durationSeconds': item.durationSeconds,
           },
       ],
       'events': [

@@ -26,6 +26,12 @@ void main() {
                 now.add(const Duration(hours: 2)).millisecondsSinceEpoch ~/
                 1000,
           },
+          'secondary_window': {
+            'used_percent': 54,
+            'limit_window_seconds': 604800,
+            'reset_at':
+                now.add(const Duration(days: 3)).millisecondsSinceEpoch ~/ 1000,
+          },
         },
         'additional_rate_limits': [
           {
@@ -60,6 +66,12 @@ void main() {
             'reset_at':
                 now.add(const Duration(hours: 2)).millisecondsSinceEpoch ~/
                 1000,
+          },
+          'secondary_window': {
+            'used_percent': 56,
+            'limit_window_seconds': 604800,
+            'reset_at':
+                now.add(const Duration(days: 3)).millisecondsSinceEpoch ~/ 1000,
           },
         },
       }),
@@ -126,14 +138,23 @@ void main() {
     expect(json['history'], isNotEmpty);
     expect(json['history'][0]['remainingPercent'], 68);
     expect(json['history'][0]['usedPercent'], 32);
+    expect(
+      (json['history'] as List).map((row) => row['durationSeconds']),
+      containsAll([18000, 604800]),
+    );
     expect(json['consumptionUnitSeconds'], 3600);
     expect(jsonDecode(result.hourlyBody)['consumptionUnitSeconds'], 300);
     expect(jsonDecode(result.cycleBody)['consumptionUnitSeconds'], 900);
-    expect(json['consumptionHistory'], hasLength(1));
+    expect(json['consumptionHistory'], hasLength(2));
     expect(json['consumptionHistory'][0]['consumedPercent'], 2);
+    expect(
+      (json['consumptionHistory'] as List).map((row) => row['durationSeconds']),
+      [18000, 604800],
+    );
     expect(json['events'], isNotEmpty);
     expect(json['device']['wifiIp'], '192.168.1.23');
     expect(json['usage']['windows'][0]['remainingPercent'], 68);
+    expect(json['usage']['windows'][1]['remainingPercent'], 46);
     expect(json['usage']['additional'][0]['name'], 'Codex Spark');
     expect(json['usage']['credits']['balance'], '12.50');
     expect(json['usage']['resetCards'], hasLength(1));
@@ -151,6 +172,11 @@ void main() {
     expect(result.page, contains('额度消耗'));
     expect(result.page, contains('consumptionAxisMax(rows)'));
     expect(result.page, contains('data.consumptionHistory'));
+    expect(result.page, contains('secondaryQuota'));
+    expect(result.page, contains('quota-segment-fill'));
+    expect(result.page, contains('durationSeconds'));
+    expect(result.page, contains('2.4s cubic-bezier'));
+    expect(result.page, contains('window.rows.forEach'));
   });
 }
 
